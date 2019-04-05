@@ -39,6 +39,8 @@ extension SwiftHTTPTests {
                 ("testRemoteClose", testRemoteClose),
                 ("testReadTimeout", testReadTimeout),
                 ("testCancel", testCancel),
+                ("testProxyPlaintext", testProxyPlaintext),
+                ("testProxyTLS", testProxyTLS),
            ]
    }
 }
