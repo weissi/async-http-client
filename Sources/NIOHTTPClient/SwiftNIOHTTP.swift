@@ -180,20 +180,9 @@ public class HTTPClient {
         }
 
         let task = HTTPTask(future: promise.futureResult)
-
-        let host: String
-        let port: Int
-
-        switch self.configuration.proxy {
-        case .none:
-            host = request.host
-            port = request.port
-        case .some(let proxy):
-            host = proxy.host
-            port = proxy.port
-        }
-
-        bootstrap.connect(host: host, port: port)
+        
+        let address = self.resolveAddress(request: request, proxy: self.configuration.proxy)
+        bootstrap.connect(host: address.0, port: address.1)
             .map { channel in
                 task.setChannel(channel)
             }
@@ -205,6 +194,15 @@ public class HTTPClient {
             }
 
         return task
+    }
+
+    private func resolveAddress(request: HTTPRequest, proxy:HTTPClientProxy?) -> (String, Int)  {
+        switch self.configuration.proxy {
+        case .none:
+            return (request.host, request.port)
+        case .some(let proxy):
+            return (proxy.host, proxy.port)
+        }
     }
 }
 
