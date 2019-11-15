@@ -14,6 +14,7 @@
 
 import NIO
 import NIOHTTP1
+import NIOHTTPCompression
 
 public final class HTTPClientCopyingDelegate: HTTPClientResponseDelegate {
     public typealias Response = Void
@@ -30,5 +31,38 @@ public final class HTTPClientCopyingDelegate: HTTPClientResponseDelegate {
 
     public func didFinishRequest(task: HTTPClient.Task<Void>) throws {
         return ()
+    }
+}
+
+extension ClientBootstrap {
+    static func makeHTTPClientBootstrapBase(group: EventLoopGroup, host: String, port: Int, configuration: HTTPClient.Configuration, channelInitializer: ((Channel) -> EventLoopFuture<Void>)? = nil) -> ClientBootstrap {
+        return ClientBootstrap(group: group)
+            .channelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_TCP), TCP_NODELAY), value: 1)
+
+            .channelInitializer { channel in
+                let channelAddedFuture: EventLoopFuture<Void>
+                switch configuration.proxy {
+                case .none:
+                    channelAddedFuture = group.next().makeSucceededFuture(())
+                case .some:
+                    channelAddedFuture = channel.pipeline.addProxyHandler(host: host, port: port, authorization: configuration.proxy?.authorization)
+                }
+                return channelAddedFuture.flatMap { (_: Void) -> EventLoopFuture<Void> in
+                    channelInitializer?(channel) ?? group.next().makeSucceededFuture(())
+                }
+            }
+    }
+}
+
+func resolve(timeout: TimeAmount?, deadline: NIODeadline?) -> TimeAmount? {
+    switch (timeout, deadline) {
+    case (.some(let timeout), .some(let deadline)):
+        return min(timeout, deadline - .now())
+    case (.some(let timeout), .none):
+        return timeout
+    case (.none, .some(let deadline)):
+        return deadline - .now()
+    case (.none, .none):
+        return nil
     }
 }

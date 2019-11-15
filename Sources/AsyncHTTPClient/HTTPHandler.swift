@@ -451,7 +451,7 @@ extension HTTPClient {
         public let eventLoop: EventLoop
 
         let promise: EventLoopPromise<Response>
-        var channel: Channel?
+        var connection: ConnectionPool.Connection?
         private var cancelled: Bool
         private let lock: Lock
 
@@ -480,7 +480,7 @@ extension HTTPClient {
             let channel: Channel? = self.lock.withLock {
                 if !cancelled {
                     cancelled = true
-                    return self.channel
+                    return self.connection?.channel
                 }
                 return nil
             }
@@ -488,10 +488,53 @@ extension HTTPClient {
         }
 
         @discardableResult
-        func setChannel(_ channel: Channel) -> Channel {
+        func setConnection(_ connection: ConnectionPool.Connection) -> ConnectionPool.Connection {
             return self.lock.withLock {
-                self.channel = channel
-                return channel
+                self.connection = connection
+                return connection
+            }
+        }
+
+        func succeed(_ value: Response) {
+            if let connection = self.connection {
+                connection.channel.pipeline.removeHandler(name: "taskHandler").whenComplete { result in
+                    switch result {
+                    case .success:
+                        connection.release()
+                        self.promise.succeed(value)
+                    case .failure(let error):
+                        fatalError("Couldn't remove taskHandler: \(error)")
+                    }
+                }
+            }
+        }
+
+        func fail(_ error: Error) {
+            if let connection = self.connection {
+                connection.channel.close().whenComplete { _ in
+                    connection.channel.pipeline.removeHandler(name: "taskHandler").whenComplete { result in
+                        switch result {
+                        case .success:
+                            connection.release()
+                            self.promise.fail(error)
+                        case .failure(let error):
+                            fatalError("Couldn't remove taskHandler: \(error)")
+                        }
+                    }
+                }
+            }
+        }
+
+        func releaseAssociatedConnection() {
+            if let connection = self.connection {
+                connection.channel.pipeline.removeHandler(name: "taskHandler").whenComplete { result in
+                    switch result {
+                    case .success:
+                        connection.release()
+                    case .failure(let error):
+                        fatalError("Couldn't remove taskHandler: \(error)")
+                    }
+                }
             }
         }
     }
@@ -644,11 +687,6 @@ extension TaskHandler: ChannelDuplexHandler {
             context.eventLoop.assertInEventLoop()
             self.state = .sent
             self.callOutToDelegateFireAndForget(self.delegate.didSendRequest)
-
-            let channel = context.channel
-            self.task.futureResult.whenComplete { _ in
-                channel.close(promise: nil)
-            }
         }.flatMapErrorThrowing { error in
             context.eventLoop.assertInEventLoop()
             self.state = .end
@@ -710,6 +748,7 @@ extension TaskHandler: ChannelDuplexHandler {
             switch self.state {
             case .redirected(let head, let redirectURL):
                 self.state = .end
+//                self.task.releaseAssociatedConnection()
                 self.redirectHandler?.redirect(status: head.status, to: redirectURL, promise: self.task.promise)
                 context.close(promise: nil)
             default:

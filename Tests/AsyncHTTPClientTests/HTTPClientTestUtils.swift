@@ -112,13 +112,13 @@ internal final class HTTPBin {
         return channel.pipeline.addHandler(try! NIOSSLServerHandler(context: context), position: .first)
     }
 
-    init(ssl: Bool = false, compress: Bool = false, simulateProxy: HTTPProxySimulator.Option? = nil, channelPromise: EventLoopPromise<Channel>? = nil) {
+    init(ssl: Bool = false, compress: Bool = false, simulateProxy: HTTPProxySimulator.Option? = nil, channelPromise: EventLoopPromise<Channel>? = nil, connectionDelay: TimeAmount = .nanoseconds(0), maxChannelAge: TimeAmount? = nil) {
         self.serverChannel = try! ServerBootstrap(group: self.group)
             .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
             .childChannelOption(ChannelOptions.socket(IPPROTO_TCP, TCP_NODELAY), value: 1)
             .childChannelInitializer { channel in
-                channel.pipeline.configureHTTPServerPipeline(withPipeliningAssistance: true, withErrorHandling: true)
-                    .flatMap {
+                channel.eventLoop.scheduleTask(in: connectionDelay) {}.futureResult.flatMap {
+                    channel.pipeline.configureHTTPServerPipeline(withPipeliningAssistance: true, withErrorHandling: true).flatMap {
                         if compress {
                             return channel.pipeline.addHandler(HTTPResponseCompressor())
                         } else {
@@ -134,8 +134,7 @@ internal final class HTTPBin {
                         } else {
                             return channel.eventLoop.makeSucceededFuture(())
                         }
-                    }
-                    .flatMap {
+                    }.flatMap {
                         if ssl {
                             return HTTPBin.configureTLS(channel: channel).flatMap {
                                 channel.pipeline.addHandler(HttpBinHandler(channelPromise: channelPromise))
@@ -144,8 +143,8 @@ internal final class HTTPBin {
                             return channel.pipeline.addHandler(HttpBinHandler(channelPromise: channelPromise))
                         }
                     }
-            }
-            .bind(host: "127.0.0.1", port: 0).wait()
+                }
+            }.bind(host: "127.0.0.1", port: 0).wait()
     }
 
     func shutdown() throws {
@@ -240,14 +239,53 @@ internal final class HttpBinHandler: ChannelInboundHandler {
 
     let channelPromise: EventLoopPromise<Channel>?
     var resps = CircularBuffer<HTTPResponseBuilder>()
+    var closeAfterResponse = false
+    var delay: TimeAmount = .seconds(0)
+    let creationDate = Date()
+    let maxChannelAge: TimeAmount?
+    var shouldClose = false
+    var isServingRequest = false
 
-    init(channelPromise: EventLoopPromise<Channel>? = nil) {
+    init(channelPromise: EventLoopPromise<Channel>? = nil, maxChannelAge: TimeAmount? = nil) {
         self.channelPromise = channelPromise
+        self.maxChannelAge = maxChannelAge
+    }
+
+    func handlerAdded(context: ChannelHandlerContext) {
+        if let maxChannelAge = self.maxChannelAge {
+            context.eventLoop.scheduleTask(in: maxChannelAge) {
+                if !self.isServingRequest {
+                    context.close(promise: nil)
+                } else {
+                    self.shouldClose = true
+                }
+            }
+        }
+    }
+
+    func parseAndSetOptions(from head: HTTPRequestHead) {
+        if let delay = head.headers["X-internal-delay"].first {
+            if let milliseconds = Int64(delay) {
+                self.delay = TimeAmount.milliseconds(milliseconds)
+            } else {
+                assertionFailure("Invalid interval format")
+            }
+        } else {
+            self.delay = .nanoseconds(0)
+        }
+
+        if let connection = head.headers["Connection"].first {
+            self.closeAfterResponse = (connection == "close")
+        } else {
+            self.closeAfterResponse = false
+        }
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        self.isServingRequest = true
         switch self.unwrapInboundIn(data) {
         case .head(let req):
+            self.parseAndSetOptions(from: req)
             let url = URL(string: req.uri)!
             switch url.path {
             case "/ok":
@@ -357,7 +395,19 @@ internal final class HttpBinHandler: ChannelInboundHandler {
                 responseBody.writeBytes(serialized)
                 context.write(wrapOutboundOut(.body(.byteBuffer(responseBody))), promise: nil)
             }
-            context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
+            context.eventLoop.scheduleTask(in: self.delay) {
+                context.writeAndFlush(self.wrapOutboundOut(.end(nil))).whenComplete { result in
+                    self.isServingRequest = false
+                    switch result {
+                    case .success:
+                        if self.closeAfterResponse || self.shouldClose {
+                            context.close(promise: nil)
+                        }
+                    case .failure(let error):
+                        assertionFailure("\(error)")
+                    }
+                }
+            }
         }
     }
 
