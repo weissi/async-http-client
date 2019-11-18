@@ -840,4 +840,49 @@ class HTTPClientTests: XCTestCase {
             XCTAssertNil(response?.body)
         }
     }
+
+    func testStressGetHttps() throws {
+        let httpBin = HTTPBin(ssl: true)
+        let httpClient = HTTPClient(eventLoopGroupProvider: .createNew,
+                                    configuration: HTTPClient.Configuration(certificateVerification: .none))
+        defer {
+            XCTAssertNoThrow(try httpClient.syncShutdown())
+            XCTAssertNoThrow(try httpBin.shutdown())
+        }
+
+        let eventLoop = httpClient.eventLoopGroup
+        let lastReqPromise = eventLoop.next().makePromise(of: Void.self)
+        let requestCount = 200
+        for i in 1...requestCount {
+            let req = try HTTPClient.Request(url: "https://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "100"])
+            httpClient.execute(request: req).whenComplete { result in
+                switch result {
+                case .success(let response):
+                    XCTAssertEqual(.ok, response.status)
+                case .failure(let error):
+                    XCTFail("\(error)")
+                }
+                if i == requestCount {
+                    lastReqPromise.succeed(())
+                }
+            }
+        }
+        try! lastReqPromise.futureResult.wait()
+    }
+
+    func testResponseDelayGet() throws {
+        let httpBin = HTTPBin(ssl: false)
+        let httpClient = HTTPClient(eventLoopGroupProvider: .createNew,
+                                    configuration: HTTPClient.Configuration(certificateVerification: .none))
+        defer {
+            XCTAssertNoThrow(try httpClient.syncShutdown())
+            XCTAssertNoThrow(try httpBin.shutdown())
+        }
+
+        let req = try HTTPClient.Request(url: "http://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "2000"], body: nil)
+        let start = Date()
+        let response = try! httpClient.execute(request: req).wait()
+        XCTAssertEqual(Date().timeIntervalSince(start), 2, accuracy: 0.25)
+        XCTAssertEqual(response.status, .ok)
+    }
 }
