@@ -16,7 +16,6 @@ import Foundation
 import NIO
 import NIOConcurrencyHelpers
 import NIOHTTP1
-import NIOHTTP2
 import NIOTLS
 
 /// A connection pool that manages and creates new connections to hosts respecting the specified preferences
@@ -127,16 +126,9 @@ class ConnectionPool {
                     }
                 }
 
-                let h2PipelineConfigurator: (ChannelPipeline) -> EventLoopFuture<Void> = { _ in
-                    channel.configureHTTP2Pipeline(mode: .client).map { multiplexer in
-                        let http2Provider = ConnectionProvider.http2(HTTP2ConnectionProvider(group: self.loopGroup, key: key, configuration: self.configuration, channel: channel, multiplexer: multiplexer, parentPool: self))
-                        protocolChoosenPromise.succeed(http2Provider)
-                    }
-                }
-
                 if request.useTLS {
                     _ = channel.pipeline.addSSLHandlerIfNeeded(for: key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap { _ in
-                        channel.pipeline.configureHTTP2SecureUpgrade(h2PipelineConfigurator: h2PipelineConfigurator, http1PipelineConfigurator: http1PipelineConfigurator)
+                        http1PipelineConfigurator(channel.pipeline)
                     }
                 } else {
                     _ = http1PipelineConfigurator(channel.pipeline)
@@ -217,14 +209,11 @@ class ConnectionPool {
     /// This enum abstracts the underlying kind of provider
     enum ConnectionProvider {
         case http1(HTTP1ConnectionProvider)
-        case http2(HTTP2ConnectionProvider)
         indirect case future(EventLoopFuture<ConnectionProvider>)
 
         func getConnection(eventLoop: EventLoop) -> EventLoopFuture<Connection> {
             switch self {
             case .http1(let provider):
-                return provider.getConnection(preference: .delegate(on: eventLoop))
-            case .http2(let provider):
                 return provider.getConnection(preference: .delegate(on: eventLoop))
             case .future(let futureProvider):
                 return futureProvider.flatMap { provider in
@@ -237,8 +226,6 @@ class ConnectionPool {
             switch self {
             case .http1(let provider):
                 return provider.release(connection: connection)
-            case .http2(let provider):
-                return provider.release(connection: connection)
             case .future(let futureProvider):
                 futureProvider.whenSuccess { provider in
                     provider.release(connection: connection)
@@ -249,8 +236,6 @@ class ConnectionPool {
         func closeAllConnections() -> EventLoopFuture<Void> {
             switch self {
             case .http1(let provider):
-                return provider.closeAllConnections()
-            case .http2(let provider):
                 return provider.closeAllConnections()
             case .future(let futureProvider):
                 return futureProvider.flatMap { provider in
@@ -391,52 +376,6 @@ class ConnectionPool {
         struct Waiter {
             var promise: EventLoopPromise<Connection>
             var preference: HTTPClient.EventLoopPreference
-        }
-    }
-
-    class HTTP2ConnectionProvider {
-        init(group: EventLoopGroup, key: Key, configuration: HTTPClient.Configuration, channel: Channel, multiplexer: HTTP2StreamMultiplexer, parentPool: ConnectionPool) {
-            self.loopGroup = group
-            self.key = key
-            self.configuration = configuration
-            self.multiplexer = multiplexer
-            self.channel = channel
-            self.parentPool = parentPool
-        }
-
-        let loopGroup: EventLoopGroup
-        let key: Key
-        let multiplexer: HTTP2StreamMultiplexer
-        let channel: Channel
-        let configuration: HTTPClient.Configuration
-        let lock = Lock()
-        let parentPool: ConnectionPool
-        var closeFuture: EventLoopFuture<Void> {
-            return self.channel.closeFuture
-        }
-
-        func getConnection(preference: HTTPClient.EventLoopPreference) -> EventLoopFuture<Connection> {
-            return self.lock.withLock {
-                let promise = self.loopGroup.next().makePromise(of: Channel.self)
-                self.multiplexer.createStreamChannel(promise: promise) { channel, streamID in
-                    channel.pipeline.addHandler(HTTP2ToHTTP1ClientCodec(streamID: streamID, httpProtocol: .https))
-                }
-                return promise.futureResult.map { channel in
-                    Connection(key: self.key, channel: channel, parentPool: self.parentPool)
-                }
-            }
-        }
-
-        func release(connection: Connection) {
-            _ = connection.channel.close()
-        }
-
-        func closeAllConnections() -> EventLoopFuture<Void> {
-            return self.lock.withLock {
-                // FIXME: Is this correct regarding the child channels?
-                // I don't know how HTTP 2 "substreams" must be handled
-                channel.close()
-            }
         }
     }
 }

@@ -16,7 +16,6 @@ import Foundation
 import NIO
 import NIOConcurrencyHelpers
 import NIOHTTP1
-import NIOHTTP2
 import NIOHTTPCompression
 import NIOSSL
 
@@ -487,7 +486,7 @@ extension ChannelPipeline {
         }
 
         do {
-            let tlsConfiguration = tlsConfiguration ?? TLSConfiguration.forClient(applicationProtocols: NIOHTTP2SupportedALPNProtocols)
+            let tlsConfiguration = tlsConfiguration ?? TLSConfiguration.forClient()
             let context = try NIOSSLContext(configuration: tlsConfiguration)
             return self.addHandler(try NIOSSLClientHandler(context: context, serverHostname: key.host))
         } catch {
