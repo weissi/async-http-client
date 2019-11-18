@@ -93,13 +93,7 @@ class ConnectionPool {
     /// is used to determine if there already exists an associated `ConnectionProvider` in `connectionProviders`
     /// if it does, the connection provider then takes care of leasing a new connection. If a connection provider doesn't exist, it is created.
     func getConnection(for request: HTTPClient.Request, eventLoop: EventLoop, deadline: NIODeadline?) -> EventLoopFuture<Connection> {
-        let key: Key
-        // Created a key and checks the URL components are valid
-        do {
-            key = try Key(url: request.url)
-        } catch {
-            return self.loopGroup.next().makeFailedFuture(error)
-        }
+        let key = Key(request: request)
 
         switch self.getAction(for: key, eventLoop: eventLoop) {
         case .existing(let provider):
