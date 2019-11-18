@@ -749,7 +749,6 @@ extension TaskHandler: ChannelDuplexHandler {
             switch self.state {
             case .redirected(let head, let redirectURL):
                 self.state = .end
-//                self.task.releaseAssociatedConnection()
                 self.redirectHandler?.redirect(status: head.status, to: redirectURL, promise: self.task.promise)
                 context.close(promise: nil)
             default:

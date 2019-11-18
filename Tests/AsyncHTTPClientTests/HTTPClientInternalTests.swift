@@ -186,13 +186,6 @@ class HTTPClientInternalTests: XCTestCase {
                 }
             }
 
-//            func didSendRequestHead(task: HTTPClient.Task<Void>, _ head: HTTPRequestHead) {
-//                // This is to force NIO to send only 1 byte at a time.
-//                let future = task.connection!.channel.setOption(ChannelOptions.maxMessagesPerRead, value: 1).flatMap {
-//                    task.connection!.channel.setOption(ChannelOptions.recvAllocator, value: FixedSizeRecvByteBufferAllocator(capacity: 1))
-//                }
-//                future.cascade(to: self.optionsApplied)
-//            }
             func didReceiveHead(task: HTTPClient.Task<Void>, _ head: HTTPResponseHead) -> EventLoopFuture<Void> {
                 // This is to force NIO to send only 1 byte at a time.
                 let future = task.connection!.channel.setOption(ChannelOptions.maxMessagesPerRead, value: 1).flatMap {
