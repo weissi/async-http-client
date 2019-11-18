@@ -180,36 +180,17 @@ class ConnectionPool {
     /// used by the `connectionProviders` dictionary to allow retreiving and
     /// creating connection providers associated to a certain request in constant time.
     struct Key: Hashable {
-        init(url: URL) throws {
-            switch url.scheme {
+        init(request: HTTPClient.Request) {
+            switch request.scheme {
             case "http":
                 self.scheme = .http
             case "https":
                 self.scheme = .https
             default:
-                if let scheme = url.scheme {
-                    throw HTTPClientError.unsupportedScheme(scheme)
-                } else {
-                    throw HTTPClientError.emptyScheme
-                }
+                fatalError("HTTPClient.Request scheme should already be a valid one")
             }
-
-            switch url.port {
-            case .some(let specifiedPort):
-                self.port = specifiedPort
-            case .none:
-                switch self.scheme {
-                case .http:
-                    self.port = 80
-                case .https:
-                    self.port = 443
-                }
-            }
-
-            guard let host = url.host else {
-                throw HTTPClientError.emptyHost
-            }
-            self.host = host
+            self.port = request.port
+            self.host = request.host
         }
 
         var scheme: Scheme
