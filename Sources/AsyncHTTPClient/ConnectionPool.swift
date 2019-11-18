@@ -101,10 +101,7 @@ class ConnectionPool {
         case .make(let providerPromise):
             // If no connection provider exists for the given key, create a new one
             let selectedEventLoop = providerPromise.futureResult.eventLoop
-            // Completed when we have been able to determine the connection
-            // should be using HTTP/1.1 or HTTP/2
-            let protocolChoosenPromise = selectedEventLoop.makePromise(of: ConnectionProvider.self)
-            self[key] = .future(protocolChoosenPromise.futureResult)
+            self[key] = .future(providerPromise.futureResult)
             var bootstrap = ClientBootstrap.makeHTTPClientBootstrapBase(group: selectedEventLoop, host: request.host, port: request.port, configuration: self.configuration) { _ in
                 self.loopGroup.next().makeSucceededFuture(())
             }
@@ -115,26 +112,17 @@ class ConnectionPool {
 
             let address = HTTPClient.resolveAddress(host: request.host, port: request.port, proxy: self.configuration.proxy)
 
-            // Determe if HTTP/1.1 or HTTP/2 should be used. This is done outside
-            // of the usual client bootstrap `.channelInitializer` because it cannot
-            // be called multiple times like it is currently the case due to Happy Eyeballs
             return bootstrap.connect(host: address.host, port: address.port).flatMap { channel in
-                let http1PipelineConfigurator: (ChannelPipeline) -> EventLoopFuture<Void> = { pipeline in
+                let http1PipelineConfigurator: (ChannelPipeline) -> EventLoopFuture<ConnectionProvider> = { pipeline in
                     pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes).map { _ in
                         let http1Provider = ConnectionProvider.http1(HTTP1ConnectionProvider(group: self.loopGroup, key: key, configuration: self.configuration, initialConnection: Connection(key: key, channel: channel, parentPool: self), parentPool: self))
-                        protocolChoosenPromise.succeed(http1Provider)
+                        return http1Provider
                     }
                 }
 
-                if request.useTLS {
-                    _ = channel.pipeline.addSSLHandlerIfNeeded(for: key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap { _ in
-                        http1PipelineConfigurator(channel.pipeline)
-                    }
-                } else {
-                    _ = http1PipelineConfigurator(channel.pipeline)
-                }
-
-                return protocolChoosenPromise.futureResult.flatMap { provider in
+                return channel.pipeline.addSSLHandlerIfNeeded(for: key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap { _ in
+                    http1PipelineConfigurator(channel.pipeline)
+                }.flatMap { provider in
                     providerPromise.succeed(provider)
                     return provider.getConnection(eventLoop: eventLoop)
                 }
