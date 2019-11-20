@@ -67,7 +67,6 @@ class ConnectionPool {
                 return .existing(provider)
             } else {
                 let promise = eventLoop.makePromise(of: ConnectionProvider.self)
-                self._connectionProviders[key] = .future(promise.futureResult)
                 promise.futureResult.whenComplete { result in
                     switch result {
                     case .success(let provider):
