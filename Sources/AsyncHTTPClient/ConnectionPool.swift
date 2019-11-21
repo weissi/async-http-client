@@ -346,8 +346,7 @@ class ConnectionPool {
 
         func closeAllConnections() -> EventLoopFuture<Void> {
             return self.lock.withLock {
-                let closeFutures = availableConnections.map { $0.channel.close().recover { _ in } }
-                return EventLoopFuture<Void>.andAllSucceed(closeFutures, on: loopGroup.next()).map {
+                EventLoopFuture<Void>.andAllComplete(availableConnections.map { $0.channel.close() }, on: loopGroup.next()).map {
                     self.availableConnections.removeAll()
                 }
             }
