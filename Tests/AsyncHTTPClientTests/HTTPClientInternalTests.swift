@@ -40,7 +40,6 @@ class HTTPClientInternalTests: XCTestCase {
         head.headers.add(name: "X-Test-Header", value: "X-Test-Value")
         head.headers.add(name: "Host", value: "localhost")
         head.headers.add(name: "Content-Length", value: "4")
-        head.headers.add(name: "Connection", value: "close")
         XCTAssertEqual(HTTPClientRequestPart.head(head), recorder.writes[0])
         let buffer = ByteBuffer.of(string: "1234")
         XCTAssertEqual(HTTPClientRequestPart.body(.byteBuffer(buffer)), recorder.writes[1])

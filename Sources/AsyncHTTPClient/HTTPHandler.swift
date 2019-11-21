@@ -496,13 +496,15 @@ extension HTTPClient {
             }
         }
 
-        func succeed(_ value: Response) {
+        func succeed(promise: EventLoopPromise<Response>?, with value: Response) {
             if let connection = self.connection {
-                connection.channel.pipeline.removeHandler(name: "taskHandler").whenComplete { result in
+                connection.channel.pipeline.removeHandler(name: "decompressHandler").recover { _ in }.flatMap { _ in
+                    connection.channel.pipeline.removeHandler(name: "taskHandler")
+                }.whenComplete { result in
                     switch result {
                     case .success:
                         connection.release()
-                        self.promise.succeed(value)
+                        promise?.succeed(value)
                     case .failure(let error):
                         fatalError("Couldn't remove taskHandler: \(error)")
                     }
@@ -545,7 +547,7 @@ internal struct TaskCancelEvent {}
 
 // MARK: - TaskHandler
 
-internal class TaskHandler<Delegate: HTTPClientResponseDelegate> {
+internal class TaskHandler<Delegate: HTTPClientResponseDelegate>: RemovableChannelHandler {
     enum State {
         case idle
         case sent
@@ -619,10 +621,12 @@ extension TaskHandler {
     }
 
     func callOutToDelegate<Response>(promise: EventLoopPromise<Response>? = nil,
-                                     _ body: @escaping (HTTPClient.Task<Delegate.Response>) throws -> Response) {
+                                     _ body: @escaping (HTTPClient.Task<Delegate.Response>) throws -> Response) where Response == Delegate.Response {
         func doIt() {
             do {
                 let result = try body(self.task)
+
+                self.task.succeed(promise: promise, with: result)
                 promise?.succeed(result)
             } catch {
                 promise?.fail(error)
@@ -639,7 +643,7 @@ extension TaskHandler {
     }
 
     func callOutToDelegate<Response>(channelEventLoop: EventLoop,
-                                     _ body: @escaping (HTTPClient.Task<Delegate.Response>) throws -> Response) -> EventLoopFuture<Response> {
+                                     _ body: @escaping (HTTPClient.Task<Delegate.Response>) throws -> Response) -> EventLoopFuture<Response> where Response == Delegate.Response {
         let promise = channelEventLoop.makePromise(of: Response.self)
         self.callOutToDelegate(promise: promise, body)
         return promise.futureResult
@@ -663,8 +667,6 @@ extension TaskHandler: ChannelDuplexHandler {
         if !request.headers.contains(name: "Host") {
             headers.add(name: "Host", value: request.host)
         }
-
-        headers.add(name: "Connection", value: "close")
 
         do {
             try headers.validate(body: request.body)

@@ -260,7 +260,8 @@ public class HTTPClient {
             case .disabled:
                 addedFuture = channel.eventLoop.makeSucceededFuture(())
             case .enabled(let limit):
-                addedFuture = channel.pipeline.addHandler(NIOHTTPResponseDecompressor(limit: limit))
+                let decompressHandler = NIOHTTPResponseDecompressor(limit: limit)
+                addedFuture = channel.pipeline.addHandler(decompressHandler, name: "decompressHandler")
             }
 
             return addedFuture.flatMap {

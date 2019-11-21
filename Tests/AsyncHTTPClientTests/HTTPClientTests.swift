@@ -689,9 +689,6 @@ class HTTPClientTests: XCTestCase {
                                                     method: .GET,
                                                     uri: "/foo",
                                                     headers: HTTPHeaders([("Host", "localhost"),
-                                                                          // The following line can be removed once we
-                                                                          // have a connection pool.
-                                                                          ("Connection", "close"),
                                                                           ("Content-Length", "0")]))),
                                         try web.readInbound()))
         XCTAssertNoThrow(XCTAssertEqual(.end(nil),
@@ -722,9 +719,6 @@ class HTTPClientTests: XCTestCase {
                                                     method: .GET,
                                                     uri: "/foo",
                                                     headers: HTTPHeaders([("Host", "localhost"),
-                                                                          // The following line can be removed once we
-                                                                          // have a connection pool.
-                                                                          ("Connection", "close"),
                                                                           ("Content-Length", "0")]))),
                                         try web.readInbound()))
         XCTAssertNoThrow(XCTAssertEqual(.end(nil),
@@ -752,9 +746,6 @@ class HTTPClientTests: XCTestCase {
                                                     method: .GET,
                                                     uri: "/foo",
                                                     headers: HTTPHeaders([("Host", "localhost"),
-                                                                          // The following line can be removed once we
-                                                                          // have a connection pool.
-                                                                          ("Connection", "close"),
                                                                           ("Content-Length", "0")]))),
                                         try web.readInbound()))
         XCTAssertNoThrow(XCTAssertEqual(.end(nil),
@@ -784,9 +775,6 @@ class HTTPClientTests: XCTestCase {
                                                         method: .GET,
                                                         uri: "/foo",
                                                         headers: HTTPHeaders([("Host", "localhost"),
-                                                                              // The following line can be removed once
-                                                                              // we have a connection pool.
-                                                                              ("Connection", "close"),
                                                                               ("Content-Length", "0")]))),
                                             try web.readInbound()))
             XCTAssertNoThrow(XCTAssertEqual(.end(nil),
@@ -821,9 +809,6 @@ class HTTPClientTests: XCTestCase {
                                                         method: .GET,
                                                         uri: "/foo",
                                                         headers: HTTPHeaders([("Host", "localhost"),
-                                                                              // The following line can be removed once
-                                                                              // we have a connection pool.
-                                                                              ("Connection", "close"),
                                                                               ("Content-Length", "0")]))),
                                             try web.readInbound()))
             XCTAssertNoThrow(XCTAssertEqual(.end(nil),
