@@ -95,7 +95,7 @@ class ConnectionPool {
 
         switch self.getAction(for: key, eventLoop: eventLoop) {
         case .existing(let provider):
-            return provider.getConnection(eventLoop: eventLoop)
+            return provider.getConnection(on: eventLoop)
 
         case .make(let providerPromise):
             // If no connection provider exists for the given key, create a new one
@@ -123,7 +123,7 @@ class ConnectionPool {
                     http1PipelineConfigurator(channel.pipeline)
                 }.flatMap { provider in
                     providerPromise.succeed(provider)
-                    return provider.getConnection(eventLoop: eventLoop)
+                    return provider.getConnection(on: eventLoop)
                 }
             }
         }
@@ -198,13 +198,13 @@ class ConnectionPool {
         case http1(HTTP1ConnectionProvider)
         indirect case future(EventLoopFuture<ConnectionProvider>)
 
-        func getConnection(eventLoop: EventLoop) -> EventLoopFuture<Connection> {
+        func getConnection(on eventLoop: EventLoop) -> EventLoopFuture<Connection> {
             switch self {
             case .http1(let provider):
                 return provider.getConnection(preference: .delegate(on: eventLoop))
             case .future(let futureProvider):
                 return futureProvider.flatMap { provider in
-                    provider.getConnection(eventLoop: eventLoop)
+                    provider.getConnection(on: eventLoop)
                 }
             }
         }
@@ -361,8 +361,8 @@ class ConnectionPool {
         }
 
         struct Waiter {
-            var promise: EventLoopPromise<Connection>
-            var preference: HTTPClient.EventLoopPreference
+            let promise: EventLoopPromise<Connection>
+            let preference: HTTPClient.EventLoopPreference
         }
     }
 }
