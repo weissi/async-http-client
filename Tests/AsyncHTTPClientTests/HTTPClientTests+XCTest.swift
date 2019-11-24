@@ -68,6 +68,8 @@ extension HTTPClientTests {
             ("testSubsequentRequestsWorkWithServerAlternatingBetweenKeepAliveAndClose", testSubsequentRequestsWorkWithServerAlternatingBetweenKeepAliveAndClose),
             ("testStressGetHttps", testStressGetHttps),
             ("testResponseDelayGet", testResponseDelayGet),
+            ("testIdleTimeoutNoReuse", testIdleTimeoutNoReuse),
+            ("testStressGetClose", testStressGetClose),
         ]
     }
 }

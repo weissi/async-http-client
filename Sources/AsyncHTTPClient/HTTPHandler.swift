@@ -498,7 +498,9 @@ extension HTTPClient {
 
         func succeed(promise: EventLoopPromise<Response>?, with value: Response) {
             if let connection = self.connection {
-                connection.channel.pipeline.removeHandler(name: "decompressHandler").recover { _ in }.flatMap { _ in
+                connection.channel.pipeline.removeHandler(name: "decompressHandler").recover { _ in }.flatMap {
+                    connection.channel.pipeline.removeHandler(name: "timeoutHandler")
+                }.recover { _ in }.flatMap { _ in
                     connection.channel.pipeline.removeHandler(name: "taskHandler")
                 }.whenComplete { result in
                     switch result {

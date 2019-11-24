@@ -266,7 +266,7 @@ public class HTTPClient {
 
             return addedFuture.flatMap {
                 if let timeout = self.resolve(timeout: self.configuration.timeout.read, deadline: deadline) {
-                    return channel.pipeline.addHandler(IdleStateHandler(readTimeout: timeout))
+                    return channel.pipeline.addHandler(IdleStateHandler(readTimeout: timeout), name: "timeoutHandler")
                 } else {
                     return channel.eventLoop.makeSucceededFuture(())
                 }

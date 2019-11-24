@@ -133,8 +133,6 @@ class ConnectionPool {
         self.lock.withLock {
             if let provider = self._connectionProviders[connection.key] {
                 provider.release(connection: connection)
-            } else {
-                fatalError("Attempting to release a connection that doesn't belong to the pool")
             }
         }
     }
@@ -326,13 +324,13 @@ class ConnectionPool {
 
         func release(connection: Connection) {
             self.lock.withLock {
-                connection.isLeased = false
                 if connection.channel.isActive {
                     if let firstWaiter = waiters.popFirst() {
                         firstWaiter.promise.succeed(connection)
                     } else {
                         self.availableConnections.append(connection)
                         leased -= 1
+                        connection.isLeased = false
                     }
                 } else {
                     if let firstWaiter = waiters.popFirst() {

@@ -540,6 +540,29 @@ extension ByteBuffer {
     }
 }
 
+struct EventLoopFutureTimeoutError: Error {}
+
+extension EventLoopFuture {
+    func timeout(after failDelay: TimeAmount) -> EventLoopFuture<Value> {
+        let promise = self.eventLoop.makePromise(of: Value.self)
+
+        self.whenComplete { result in
+            switch result {
+            case .success(let value):
+                promise.succeed(value)
+            case .failure(let error):
+                promise.fail(error)
+            }
+        }
+
+        self.eventLoop.scheduleTask(in: failDelay) {
+            promise.fail(EventLoopFutureTimeoutError())
+        }
+
+        return promise.futureResult
+    }
+}
+
 private let cert = """
 -----BEGIN CERTIFICATE-----
 MIICmDCCAYACCQCPC8JDqMh1zzANBgkqhkiG9w0BAQsFADANMQswCQYDVQQGEwJ1
