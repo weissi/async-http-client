@@ -49,7 +49,7 @@ public class HTTPClient {
     let eventLoopGroupProvider: EventLoopGroupProvider
     let configuration: Configuration
     let pool: ConnectionPool
-    let isShutdown = Atomic<Bool>(value: false)
+    let isShutdown = NIOAtomic.makeAtomic(value: false)
 
     /// Create an `HTTPClient` with specified `EventLoopGroup` provider and configuration.
     ///
@@ -74,7 +74,7 @@ public class HTTPClient {
 
     /// Shuts down the client and `EventLoopGroup` if it was created by the client.
     public func syncShutdown() throws {
-        try self.pool.closeAllConnections().wait()
+        try self.pool.syncClose()
         switch self.eventLoopGroupProvider {
         case .shared:
             self.isShutdown.store(true)
@@ -191,8 +191,7 @@ public class HTTPClient {
     public func execute<Delegate: HTTPClientResponseDelegate>(request: Request,
                                                               delegate: Delegate,
                                                               deadline: NIODeadline? = nil) -> Task<Delegate.Response> {
-        let eventLoop = self.eventLoopGroup.next()
-        return self.execute(request: request, delegate: delegate, eventLoop: eventLoop, deadline: deadline)
+        return self.execute(request: request, delegate: delegate, eventLoop: .indifferent, deadline: deadline)
     }
 
     /// Execute arbitrary HTTP request and handle response processing using provided delegate.
@@ -206,29 +205,21 @@ public class HTTPClient {
                                                               delegate: Delegate,
                                                               eventLoop: EventLoopPreference,
                                                               deadline: NIODeadline? = nil) -> Task<Delegate.Response> {
+        let taskEL: EventLoop
         switch eventLoop.preference {
         case .indifferent:
-            return self.execute(request: request, delegate: delegate, eventLoop: self.eventLoopGroup.next(), deadline: deadline)
+            // FIXME: Choose the same event loop as the default one for the connection provider
+            taskEL = self.eventLoopGroup.next()
         case .delegate(on: let eventLoop):
             precondition(self.eventLoopGroup.makeIterator().contains { $0 === eventLoop }, "Provided EventLoop must be part of clients EventLoopGroup.")
-            return self.execute(request: request, delegate: delegate, eventLoop: eventLoop, deadline: deadline)
+            taskEL = eventLoop
         case .delegateAndChannel(on: let eventLoop):
             precondition(self.eventLoopGroup.makeIterator().contains { $0 === eventLoop }, "Provided EventLoop must be part of clients EventLoopGroup.")
-            return self.execute(request: request, delegate: delegate, eventLoop: eventLoop, deadline: deadline)
-        case .testOnly_exact(channelOn: let channelEL, delegateOn: let delegateEL):
-            return self.execute(request: request,
-                                delegate: delegate,
-                                eventLoop: delegateEL,
-                                channelEL: channelEL,
-                                deadline: deadline)
+            taskEL = eventLoop
+        case .testOnly_exact(_, delegateOn: let delegateEL):
+            taskEL = delegateEL
         }
-    }
 
-    private func execute<Delegate: HTTPClientResponseDelegate>(request: Request,
-                                                               delegate: Delegate,
-                                                               eventLoop delegateEL: EventLoop,
-                                                               channelEL: EventLoop? = nil,
-                                                               deadline: NIODeadline? = nil) -> Task<Delegate.Response> {
         let redirectHandler: RedirectHandler<Delegate.Response>?
         switch self.configuration.redirectConfiguration.configuration {
         case .follow(let max, let allowCycles):
@@ -239,18 +230,17 @@ public class HTTPClient {
             redirectHandler = RedirectHandler<Delegate.Response>(request: request) { newRequest in
                 self.execute(request: newRequest,
                              delegate: delegate,
-                             eventLoop: delegateEL,
-                             channelEL: channelEL,
+                             eventLoop: eventLoop,
                              deadline: deadline)
             }
         case .disallow:
             redirectHandler = nil
         }
 
-        let task = Task<Delegate.Response>(eventLoop: delegateEL)
+        let task = Task<Delegate.Response>(eventLoop: taskEL)
         let promise = task.promise
 
-        let connection = self.pool.getConnection(for: request, eventLoop: delegateEL, deadline: deadline)
+        let connection = self.pool.getConnection(for: request, preference: eventLoop, deadline: deadline)
 
         connection.flatMap { connection -> EventLoopFuture<Void> in
             let channel = connection.channel
@@ -277,9 +267,8 @@ public class HTTPClient {
             }.flatMap {
                 channel.writeAndFlush(request)
             }
-        }.whenFailure { error in
-            promise.fail(error)
-        }
+        }.cascadeFailure(to: promise)
+
         return task
     }
 

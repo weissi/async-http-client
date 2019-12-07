@@ -66,3 +66,30 @@ func resolve(timeout: TimeAmount?, deadline: NIODeadline?) -> TimeAmount? {
         return nil
     }
 }
+
+extension CircularBuffer {
+    @discardableResult
+    mutating func swapRemove(at index: Index) -> Element? {
+        precondition(index >= self.startIndex && index < self.endIndex)
+        if !self.isEmpty {
+            self.swapAt(self.startIndex, index)
+            return self.removeFirst()
+        } else {
+            return nil
+        }
+    }
+
+    @discardableResult
+    mutating func swapRemove(where predicate: (Element) throws -> Bool) rethrows -> Element? {
+        if let existingIndex = try self.firstIndex(where: predicate) {
+            return self.swapRemove(at: existingIndex)
+        } else {
+            return nil
+        }
+    }
+
+    @discardableResult
+    mutating func swapRemoveWhereOrFirst(where predicate: (Element) throws -> Bool) rethrows -> Element? {
+        return try self.swapRemove(where: predicate) ?? self.popFirst()
+    }
+}
