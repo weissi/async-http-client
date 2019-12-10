@@ -62,6 +62,7 @@ class ConnectionPool {
                 return .useExisting(provider)
             } else {
                 let promise = eventLoop.makePromise(of: ConnectionProvider.self)
+                self._connectionProviders[key] = .future(promise.futureResult)
                 promise.futureResult.whenComplete { result in
                     switch result {
                     case .success(let provider):
@@ -95,8 +96,6 @@ class ConnectionPool {
         case .make(completing: let providerPromise):
             // If no connection provider exists for the given key, create a new one
             let selectedEventLoop = providerPromise.futureResult.eventLoop
-            // FIXME: Maybe wrong to do this here instead of within getAction
-            self[key] = .future(providerPromise.futureResult)
             var bootstrap = ClientBootstrap.makeHTTPClientBootstrapBase(group: selectedEventLoop, host: request.host, port: request.port, configuration: self.configuration) { _ in
                 self.loopGroup.next().makeSucceededFuture(())
             }
