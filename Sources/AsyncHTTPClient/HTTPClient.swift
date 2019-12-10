@@ -203,10 +203,10 @@ public class HTTPClient {
     ///     - deadline: Point in time by which the request must complete.
     public func execute<Delegate: HTTPClientResponseDelegate>(request: Request,
                                                               delegate: Delegate,
-                                                              eventLoop: EventLoopPreference,
+                                                              eventLoop eventLoopPreference: EventLoopPreference,
                                                               deadline: NIODeadline? = nil) -> Task<Delegate.Response> {
         let taskEL: EventLoop
-        switch eventLoop.preference {
+        switch eventLoopPreference.preference {
         case .indifferent:
             // FIXME: Choose the same event loop as the default one for the connection provider
             taskEL = self.eventLoopGroup.next()
@@ -230,7 +230,7 @@ public class HTTPClient {
             redirectHandler = RedirectHandler<Delegate.Response>(request: request) { newRequest in
                 self.execute(request: newRequest,
                              delegate: delegate,
-                             eventLoop: eventLoop,
+                             eventLoop: eventLoopPreference,
                              deadline: deadline)
             }
         case .disallow:
@@ -240,7 +240,7 @@ public class HTTPClient {
         let task = Task<Delegate.Response>(eventLoop: taskEL)
         let promise = task.promise
 
-        let connection = self.pool.getConnection(for: request, preference: eventLoop, deadline: deadline)
+        let connection = self.pool.getConnection(for: request, preference: eventLoopPreference, deadline: deadline)
 
         connection.flatMap { connection -> EventLoopFuture<Void> in
             let channel = connection.channel
