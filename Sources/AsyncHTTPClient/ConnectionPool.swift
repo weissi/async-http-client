@@ -21,10 +21,10 @@ import NIOTLS
 /// A connection pool that manages and creates new connections to hosts respecting the specified preferences
 class ConnectionPool {
     /// The default look group used to schedule async work
-    let loopGroup: EventLoopGroup
+    private let loopGroup: EventLoopGroup
 
     /// The configuration used to bootstrap new HTTP connections
-    let configuration: HTTPClient.Configuration
+    private let configuration: HTTPClient.Configuration
 
     /// The main data structure used by the `ConnectionPool` to retreive and create connections associated
     /// to a a given `Key` .
@@ -227,14 +227,14 @@ class ConnectionPool {
     }
 
     class HTTP1ConnectionProvider {
-        let eventLoop: EventLoop
-        let configuration: HTTPClient.Configuration
-        let key: ConnectionPool.Key
+        private let eventLoop: EventLoop
+        private let configuration: HTTPClient.Configuration
+        private let key: ConnectionPool.Key
         private var state: State
-        var isClosed: NIOAtomic<Bool>
-        let maximumConcurrentConnections: Int = 8
-        let lock = Lock()
-        let parentPool: ConnectionPool
+        private var isClosed: NIOAtomic<Bool>
+        private let maximumConcurrentConnections: Int = 8
+        private let lock = Lock()
+        private let parentPool: ConnectionPool
 
         init(group: EventLoopGroup, key: ConnectionPool.Key, configuration: HTTPClient.Configuration, initialConnection: Connection, parentPool: ConnectionPool) {
             self.eventLoop = initialConnection.channel.eventLoop
@@ -327,7 +327,7 @@ class ConnectionPool {
             }
         }
 
-        func configureCloseCallback(of connection: Connection) {
+        private func configureCloseCallback(of connection: Connection) {
             connection.channel.closeFuture.whenComplete { result in
                 switch result {
                 case .success:
@@ -366,7 +366,7 @@ class ConnectionPool {
             self.lock.withLock { self.state.availableConnections.removeAll() }
         }
 
-        struct State {
+        private struct State {
             /// The default `EventLoop` to use for this `HTTP1ConnectionProvider`
             private let defaultEventLoop: EventLoop
 
@@ -377,7 +377,7 @@ class ConnectionPool {
             fileprivate var availableConnections: CircularBuffer<Connection> = .init(initialCapacity: 8)
 
             /// The number of currently leased connections
-            var leased: Int = 0
+            fileprivate var leased: Int = 0
 
             /// Consumers that weren't able to get a new connection without exceeding
             /// `maximumConcurrentConnections` get a `Future<Connection>`
@@ -385,12 +385,12 @@ class ConnectionPool {
             /// as soon as possible by the provider, in FIFO order.
             private var waiters: CircularBuffer<Waiter> = .init(initialCapacity: 8)
 
-            init(initialConnection: Connection) {
+            fileprivate init(initialConnection: Connection) {
                 self.availableConnections.append(initialConnection)
                 self.defaultEventLoop = initialConnection.channel.eventLoop
             }
 
-            mutating func connectionAction(for preference: HTTPClient.EventLoopPreference) -> ConnectionGetAction {
+            fileprivate mutating func connectionAction(for preference: HTTPClient.EventLoopPreference) -> ConnectionGetAction {
                 if self.leased < self.maximumConcurrentConnections {
                     self.leased += 1
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(preference)
@@ -414,7 +414,7 @@ class ConnectionPool {
                 }
             }
 
-            mutating func releaseAction(for connection: Connection) -> ConnectionReleaseAction {
+            fileprivate mutating func releaseAction(for connection: Connection) -> ConnectionReleaseAction {
                 if let firstWaiter = waiters.first {
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(firstWaiter.preference)
 
@@ -444,7 +444,7 @@ class ConnectionPool {
                 }
             }
 
-            mutating func removeClosedConnection(_ connection: Connection) -> ClosedConnectionRemoveAction {
+            fileprivate mutating func removeClosedConnection(_ connection: Connection) -> ClosedConnectionRemoveAction {
                 if connection.isLeased {
                     self.leased -= 1
                     if let firstWaiter = self.waiters.popFirst() {
@@ -457,7 +457,7 @@ class ConnectionPool {
                 return self.providerMustClose() ? .removeProvider : .none
             }
 
-            mutating func popConnectionPromiseToFail() -> (promise: EventLoopPromise<Connection>?, providerMustClose: Bool) {
+            fileprivate mutating func popConnectionPromiseToFail() -> (promise: EventLoopPromise<Connection>?, providerMustClose: Bool) {
                 return (self.waiters.popFirst()?.promise, self.providerMustClose())
             }
 
@@ -476,13 +476,13 @@ class ConnectionPool {
                 }
             }
 
-            enum ConnectionGetAction {
+            fileprivate enum ConnectionGetAction {
                 case leaseConnection(Connection)
                 case makeConnection(EventLoop)
                 case leaseFutureConnection(EventLoopFuture<Connection>)
             }
 
-            enum ConnectionReleaseAction {
+            fileprivate enum ConnectionReleaseAction {
                 case succeed(EventLoopPromise<Connection>)
                 case makeConnectionAndComplete(EventLoop, EventLoopPromise<Connection>)
                 case replaceConnection(EventLoop)
@@ -490,7 +490,7 @@ class ConnectionPool {
                 case none
             }
 
-            enum ClosedConnectionRemoveAction {
+            fileprivate enum ClosedConnectionRemoveAction {
                 case none
                 case removeProvider
                 case makeConnectionAndComplete(EventLoop, EventLoopPromise<Connection>)
