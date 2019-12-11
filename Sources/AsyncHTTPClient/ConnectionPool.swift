@@ -53,9 +53,9 @@ class ConnectionPool {
         }
     }
 
-    /// Determines what action should be taken regarding the the `ConnectionProvider`
+    /// Determines what action should be taken regarding the `ConnectionProvider`
     ///
-    /// This method ensures there is no race condition if called concurently from multiple threads
+    /// This method ensures there is no race condition if called concurrently from multiple threads
     private func getAction(for key: Key, eventLoop: EventLoop) -> ProviderGetAction {
         return self.lock.withLock {
             if let provider = self._connectionProviders[key] {
