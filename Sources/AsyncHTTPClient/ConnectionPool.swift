@@ -32,7 +32,7 @@ class ConnectionPool {
     ///
     /// Accesses that only need synchronization for the span of a get or set can use the subscript instead of this property
     private let connectionProvidersLock = Lock()
-    
+
     init(configuration: HTTPClient.Configuration) {
         self.configuration = configuration
     }
@@ -180,7 +180,7 @@ class ConnectionPool {
             self.channel = channel
             self.parentPool = parentPool
         }
-        
+
         /// Release this `Connection` to its associated `ConnectionProvider` in the parent `ConnectionPool`
         ///
         /// This is exactly equivalent to calling `.release(theProvider)` on `ConnectionPool`
@@ -197,21 +197,21 @@ class ConnectionPool {
         /// calling `pool.release(connection)`. This gives a more object oriented feel to the API
         /// and can avoid having to keep explicit references to the pool at call site.
         let parentPool: ConnectionPool
-        
+
         /// The `Key` of this `ConnectionProvider` this `Connection` belongs to
         ///
         /// This lets `ConnectionPool` know the relationship between `Connection`s and `ConnectionProvider`s
         fileprivate let key: Key
-        
+
         /// The `Channel` of this `Connection`
         ///
         /// - Warning: Requests that lease connections from the `ConnectionPool` are responsible
         /// for removing the specific handlers they added to the `Channel` pipeline before releasing it to the pool.
         let channel: Channel
-        
+
         /// Wether the connection is currently leased or not
         var isLeased: Bool = false
-        
+
         /// Convenience property indicating wether the underlying `Channel` is active or not
         var isActive: Bool {
             return self.channel.isActive
@@ -225,7 +225,7 @@ class ConnectionPool {
     enum ConnectionProvider {
         /// An HTTP/1.1 connection provider
         case http1(HTTP1ConnectionProvider)
-        
+
         /// A future connection provider
         ///
         /// This case lets us indicate that a `ConnectionProvider` has already been
@@ -305,29 +305,29 @@ class ConnectionPool {
         /// when creating `Channel`s for requests for which the
         /// `EventLoopPreference` is set to `.indifferent`
         let eventLoop: EventLoop
-        
+
         /// The client configuration used to bootstrap new requests
         private let configuration: HTTPClient.Configuration
-        
+
         /// The key associated with this provider
         private let key: ConnectionPool.Key
-        
+
         /// The `State` of this provider
         ///
         /// This property holds data structures representing the current state of the provider
         /// - Warning: This type isn't thread safe and should be accessed with proper
         /// synchronization (see the `stateLock` property)
         private var state: State
-        
+
         /// The lock used to access and modify the `state` property
         private let stateLock = Lock()
-        
+
         /// Wether this provider is closed or not
         private var isClosed: NIOAtomic<Bool>
-        
+
         /// The maximum number of concurrent connections to a given (host, scheme, port)
         private let maximumConcurrentConnections: Int = 8
-        
+
         /// The pool this provider belongs to
         private let parentPool: ConnectionPool
 
@@ -594,11 +594,11 @@ class ConnectionPool {
             /// currently available
             ///
             /// `Waiter`s are created when `maximumConcurrentConnections` is reached
-            /// and we cannot create new connections anymore. 
+            /// and we cannot create new connections anymore.
             private struct Waiter {
                 /// The promise to complete once a connection is available
                 let promise: EventLoopPromise<Connection>
-                
+
                 /// The event loop preference associated to this particular request
                 /// that the provider should respect
                 let preference: HTTPClient.EventLoopPreference
