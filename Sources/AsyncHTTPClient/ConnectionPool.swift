@@ -52,11 +52,15 @@ class ConnectionPool {
             }
         }
     }
+    
+    func associatedEventLoop(for key: Key) -> EventLoop? {
+        return self[key]?.eventLoop
+    }
 
     /// Determines what action should be taken regarding the `ConnectionProvider`
     ///
     /// This method ensures there is no race condition if called concurrently from multiple threads
-    private func getAction(for key: Key, eventLoop: EventLoop) -> ProviderGetAction {
+    private func getAction(for key: Key, on eventLoop: EventLoop) -> ProviderGetAction {
         return self.lock.withLock {
             if let provider = self._connectionProviders[key] {
                 return .useExisting(provider)
@@ -86,10 +90,9 @@ class ConnectionPool {
     /// When the pool is asked for a new connection, it creates a `Key` from the url associated to the `request`. This key
     /// is used to determine if there already exists an associated `ConnectionProvider` in `connectionProviders`
     /// if it does, the connection provider then takes care of leasing a new connection. If a connection provider doesn't exist, it is created.
-    func getConnection(for request: HTTPClient.Request, preference: HTTPClient.EventLoopPreference, deadline: NIODeadline?) -> EventLoopFuture<Connection> {
-        let key = Key(request: request)
-        // FIXME: Is this correct to use self.loopGroup?
-        switch self.getAction(for: key, eventLoop: self.loopGroup.next()) {
+    func getConnection(for request: HTTPClient.Request, preference: HTTPClient.EventLoopPreference, on eventLoop: EventLoop, deadline: NIODeadline?) -> EventLoopFuture<Connection> {
+        let key = Key(request)
+        switch self.getAction(for: key, on: eventLoop) {
         case .useExisting(let provider):
             return provider.getConnection(preference: preference)
 
@@ -140,7 +143,7 @@ class ConnectionPool {
     /// used by the `connectionProviders` dictionary to allow retreiving and
     /// creating connection providers associated to a certain request in constant time.
     struct Key: Hashable {
-        init(request: HTTPClient.Request) {
+        init(_ request: HTTPClient.Request) {
             switch request.scheme {
             case "http":
                 self.scheme = .http
@@ -218,10 +221,19 @@ class ConnectionPool {
                 try futureProvider.wait().syncClose(requiresCleanClose: requiresCleanClose)
             }
         }
+        
+        var eventLoop: EventLoop {
+            switch self {
+            case .future(let future):
+                return future.eventLoop
+            case .http1(let provider):
+                return provider.eventLoop
+            }
+        }
     }
 
     class HTTP1ConnectionProvider {
-        private let eventLoop: EventLoop
+        let eventLoop: EventLoop
         private let configuration: HTTPClient.Configuration
         private let key: ConnectionPool.Key
         private var state: State

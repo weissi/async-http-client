@@ -222,8 +222,7 @@ public class HTTPClient {
         let taskEL: EventLoop
         switch eventLoopPreference.preference {
         case .indifferent:
-            // FIXME: Choose the same event loop as the default one for the connection provider
-            taskEL = self.eventLoopGroup.next()
+            taskEL = self.pool.associatedEventLoop(for: ConnectionPool.Key(request)) ?? self.eventLoopGroup.next()
         case .delegate(on: let eventLoop):
             precondition(self.eventLoopGroup.makeIterator().contains { $0 === eventLoop }, "Provided EventLoop must be part of clients EventLoopGroup.")
             taskEL = eventLoop
@@ -254,7 +253,7 @@ public class HTTPClient {
         let task = Task<Delegate.Response>(eventLoop: taskEL)
         let promise = task.promise
 
-        let connection = self.pool.getConnection(for: request, preference: eventLoopPreference, deadline: deadline)
+        let connection = self.pool.getConnection(for: request, preference: eventLoopPreference, on: taskEL, deadline: deadline)
 
         connection.flatMap { connection -> EventLoopFuture<Void> in
             let channel = connection.channel
