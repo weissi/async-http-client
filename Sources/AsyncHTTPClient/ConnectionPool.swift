@@ -52,7 +52,7 @@ class ConnectionPool {
             }
         }
     }
-    
+
     func associatedEventLoop(for key: Key) -> EventLoop? {
         return self[key]?.eventLoop
     }
@@ -110,7 +110,7 @@ class ConnectionPool {
             let address = HTTPClient.resolveAddress(host: request.host, port: request.port, proxy: self.configuration.proxy)
 
             return bootstrap.connect(host: address.host, port: address.port).flatMap { channel in
-                return channel.pipeline.addSSLHandlerIfNeeded(for: key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap {
+                channel.pipeline.addSSLHandlerIfNeeded(for: key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap {
                     channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes)
                 }.flatMap {
                     let provider = ConnectionProvider.http1(HTTP1ConnectionProvider(group: self.loopGroup, key: key, configuration: self.configuration, initialConnection: Connection(key: key, channel: channel, parentPool: self), parentPool: self))
@@ -221,7 +221,7 @@ class ConnectionPool {
                 try futureProvider.wait().syncClose(requiresCleanClose: requiresCleanClose)
             }
         }
-        
+
         var eventLoop: EventLoop {
             switch self {
             case .future(let future):
@@ -352,9 +352,9 @@ class ConnectionPool {
                 }
             }
         }
-        
+
         func syncClose(requiresCleanClose: Bool) throws {
-            let availableConnections = try self.lock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in 
+            let availableConnections = try self.lock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in
                 if requiresCleanClose {
                     guard self.state.leased == 0 else {
                         throw HTTPClientError.uncleanShutdown

@@ -71,10 +71,10 @@ public class HTTPClient {
     deinit {
         assert(self.isShutdown.load(), "Client not shut down before the deinit. Please call client.syncShutdown() when no longer needed.")
     }
-    
+
     /// Shuts down the client and `EventLoopGroup` if it was created by the client.
     public func syncShutdown() throws {
-        try syncShutdown(requiresCleanClose: false)
+        try self.syncShutdown(requiresCleanClose: false)
     }
 
     /// Shuts down the client and `EventLoopGroup` if it was created by the client.
