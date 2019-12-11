@@ -210,7 +210,7 @@ class ConnectionPool {
         let channel: Channel
 
         /// Wether the connection is currently leased or not
-        var isLeased: Bool = false
+        var isLeased: NIOAtomic<Bool> = .makeAtomic(value: false)
 
         /// Convenience property indicating wether the underlying `Channel` is active or not
         var isActive: Bool {
@@ -412,7 +412,7 @@ class ConnectionPool {
             return bootstrap.connect(host: address.host, port: address.port).map { channel in
                 let connection = Connection(key: self.key, channel: channel, parentPool: self.parentPool)
                 self.configureCloseCallback(of: connection)
-                connection.isLeased = true
+                connection.isLeased.store(true)
                 return connection
             }
         }
@@ -490,7 +490,7 @@ class ConnectionPool {
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(preference)
 
                     if let connection = availableConnections.swapRemove(where: { $0.channel.eventLoop === channelEL }) {
-                        connection.isLeased = true
+                        connection.isLeased.store(true)
                         return .leaseConnection(connection)
                     } else {
                         if requiresSpecifiedEL {
@@ -532,14 +532,14 @@ class ConnectionPool {
                     self.leased -= 1
                     if connection.isActive {
                         self.availableConnections.append(connection)
-                        connection.isLeased = false
+                        connection.isLeased.store(false)
                     }
                     return self.providerMustClose() ? .removeProvider : .none
                 }
             }
 
             fileprivate mutating func removeClosedConnection(_ connection: Connection) -> ClosedConnectionRemoveAction {
-                if connection.isLeased {
+                if connection.isLeased.load() {
                     self.leased -= 1
                     if let firstWaiter = self.waiters.popFirst() {
                         let (el, _) = self.resolvePreference(firstWaiter.preference)
