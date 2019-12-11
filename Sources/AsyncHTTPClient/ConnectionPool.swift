@@ -107,16 +107,10 @@ class ConnectionPool {
             let address = HTTPClient.resolveAddress(host: request.host, port: request.port, proxy: self.configuration.proxy)
 
             return bootstrap.connect(host: address.host, port: address.port).flatMap { channel in
-                let http1PipelineConfigurator: (ChannelPipeline) -> EventLoopFuture<ConnectionProvider> = { pipeline in
-                    pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes).map { _ in
-                        let http1Provider = ConnectionProvider.http1(HTTP1ConnectionProvider(group: self.loopGroup, key: key, configuration: self.configuration, initialConnection: Connection(key: key, channel: channel, parentPool: self), parentPool: self))
-                        return http1Provider
-                    }
-                }
-
-                return channel.pipeline.addSSLHandlerIfNeeded(for: key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap { _ in
-                    http1PipelineConfigurator(channel.pipeline)
-                }.flatMap { provider in
+                return channel.pipeline.addSSLHandlerIfNeeded(for: key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap {
+                    channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes)
+                }.flatMap {
+                    let provider = ConnectionProvider.http1(HTTP1ConnectionProvider(group: self.loopGroup, key: key, configuration: self.configuration, initialConnection: Connection(key: key, channel: channel, parentPool: self), parentPool: self))
                     providerPromise.succeed(provider)
                     return provider.getConnection(preference: preference)
                 }
