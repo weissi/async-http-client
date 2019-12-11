@@ -65,7 +65,7 @@ public class HTTPClient {
             self.eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         }
         self.configuration = configuration
-        self.pool = ConnectionPool(group: self.eventLoopGroup, configuration: configuration)
+        self.pool = ConnectionPool(configuration: configuration)
     }
 
     deinit {

@@ -20,9 +20,6 @@ import NIOTLS
 
 /// A connection pool that manages and creates new connections to hosts respecting the specified preferences
 class ConnectionPool {
-    /// The default look group used to schedule async work
-    private let loopGroup: EventLoopGroup
-
     /// The configuration used to bootstrap new HTTP connections
     private let configuration: HTTPClient.Configuration
 
@@ -32,9 +29,8 @@ class ConnectionPool {
     var _connectionProviders: [Key: ConnectionProvider] = [:]
 
     private let lock = Lock()
-
-    init(group: EventLoopGroup, configuration: HTTPClient.Configuration) {
-        self.loopGroup = group
+    
+    init(configuration: HTTPClient.Configuration) {
         self.configuration = configuration
     }
 
@@ -99,9 +95,7 @@ class ConnectionPool {
         case .make(completing: let providerPromise):
             // If no connection provider exists for the given key, create a new one
             let selectedEventLoop = providerPromise.futureResult.eventLoop
-            var bootstrap = ClientBootstrap.makeHTTPClientBootstrapBase(group: selectedEventLoop, host: request.host, port: request.port, configuration: self.configuration) { _ in
-                self.loopGroup.next().makeSucceededFuture(())
-            }
+            var bootstrap = ClientBootstrap.makeHTTPClientBootstrapBase(group: selectedEventLoop, host: request.host, port: request.port, configuration: self.configuration)
 
             if let timeout = resolve(timeout: self.configuration.timeout.connect, deadline: deadline) {
                 bootstrap = bootstrap.connectTimeout(timeout)
@@ -113,7 +107,7 @@ class ConnectionPool {
                 channel.pipeline.addSSLHandlerIfNeeded(for: key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap {
                     channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes)
                 }.flatMap {
-                    let provider = ConnectionProvider.http1(HTTP1ConnectionProvider(group: self.loopGroup, key: key, configuration: self.configuration, initialConnection: Connection(key: key, channel: channel, parentPool: self), parentPool: self))
+                    let provider = ConnectionProvider.http1(HTTP1ConnectionProvider(group: selectedEventLoop, key: key, configuration: self.configuration, initialConnection: Connection(key: key, channel: channel, parentPool: self), parentPool: self))
                     providerPromise.succeed(provider)
                     return provider.getConnection(preference: preference)
                 }
