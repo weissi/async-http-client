@@ -132,10 +132,10 @@ class ConnectionPool {
         }
     }
 
-    func syncClose() throws {
+    func syncClose(requiresCleanClose: Bool) throws {
         let connectionProviders = self.lock.withLock { _connectionProviders.values }
         for connectionProvider in connectionProviders {
-            try connectionProvider.syncClose()
+            try connectionProvider.syncClose(requiresCleanClose: requiresCleanClose)
         }
     }
 
@@ -216,12 +216,12 @@ class ConnectionPool {
             }
         }
 
-        func syncClose() throws {
+        func syncClose(requiresCleanClose: Bool) throws {
             switch self {
             case .http1(let provider):
-                try provider.syncClose()
+                try provider.syncClose(requiresCleanClose: requiresCleanClose)
             case .future(let futureProvider):
-                try futureProvider.wait().syncClose()
+                try futureProvider.wait().syncClose(requiresCleanClose: requiresCleanClose)
             }
         }
     }
@@ -346,10 +346,16 @@ class ConnectionPool {
                 }
             }
         }
-
-        // FIXME: What happens for leased connections or if someone requests a new connection before this completes?
-        func syncClose() throws {
-            let availableConnections = self.lock.withLock { self.state.availableConnections }
+        
+        func syncClose(requiresCleanClose: Bool) throws {
+            let availableConnections = try self.lock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in 
+                if requiresCleanClose {
+                    guard self.state.leased == 0 else {
+                        throw HTTPClientError.uncleanShutdown
+                    }
+                }
+                return self.state.availableConnections
+            }
             do {
                 try EventLoopFuture<Void>.andAllComplete(availableConnections.map { $0.channel.close() }, on: self.eventLoop).wait()
             } catch ChannelError.alreadyClosed {
@@ -371,7 +377,7 @@ class ConnectionPool {
             fileprivate var availableConnections: CircularBuffer<Connection> = .init(initialCapacity: 8)
 
             /// The number of currently leased connections
-            private var leased: Int = 0
+            var leased: Int = 0
 
             /// Consumers that weren't able to get a new connection without exceeding
             /// `maximumConcurrentConnections` get a `Future<Connection>`

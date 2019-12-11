@@ -71,10 +71,24 @@ public class HTTPClient {
     deinit {
         assert(self.isShutdown.load(), "Client not shut down before the deinit. Please call client.syncShutdown() when no longer needed.")
     }
-
+    
     /// Shuts down the client and `EventLoopGroup` if it was created by the client.
     public func syncShutdown() throws {
-        try self.pool.syncClose()
+        try syncShutdown(requiresCleanClose: false)
+    }
+
+    /// Shuts down the client and `EventLoopGroup` if it was created by the client.
+    ///
+    /// - parameters:
+    ///     - requiresCleanClose: Determine if the client should throw when it is shutdown in a non-clean state
+    ///
+    /// - Note:
+    /// The `requiresCleanClose` will let the client do additional checks about its internal consistency on shutdown and
+    /// throw the appropriate error if needed. For instance, if its internal connection pool has any non-released connections,
+    /// this indicate shutdown was called too early before tasks were completed or explicitly canceled.
+    /// In general, setting this parameter to `true` should make it easier and faster to catch related programming errors.
+    public func syncShutdown(requiresCleanClose: Bool) throws {
+        try self.pool.syncClose(requiresCleanClose: requiresCleanClose)
         switch self.eventLoopGroupProvider {
         case .shared:
             self.isShutdown.store(true)
@@ -503,6 +517,7 @@ public struct HTTPClientError: Error, Equatable, CustomStringConvertible {
         case proxyAuthenticationRequired
         case redirectLimitReached
         case redirectCycleDetected
+        case uncleanShutdown
     }
 
     private var code: Code
@@ -545,4 +560,6 @@ public struct HTTPClientError: Error, Equatable, CustomStringConvertible {
     public static let redirectLimitReached = HTTPClientError(code: .redirectLimitReached)
     /// Redirect Cycle detected.
     public static let redirectCycleDetected = HTTPClientError(code: .redirectCycleDetected)
+    /// Unclean shutdown
+    public static let uncleanShutdown = HTTPClientError(code: .uncleanShutdown)
 }
