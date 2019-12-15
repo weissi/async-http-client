@@ -97,31 +97,18 @@ class ConnectionPool {
     /// if it does, the connection provider then takes care of leasing a new connection. If a connection provider doesn't exist, it is created.
     func getConnection(for request: HTTPClient.Request, preference: HTTPClient.EventLoopPreference, on eventLoop: EventLoop, deadline: NIODeadline?) -> EventLoopFuture<Connection> {
         let key = Key(request)
-        switch self.getAction(for: key, on: eventLoop) {
-        case .useExisting(let provider):
-            return provider.getConnection(preference: preference)
 
-        case .make(completing: let providerPromise):
-            // If no connection provider exists for the given key, create a new one
-            let selectedEventLoop = providerPromise.futureResult.eventLoop
-            var bootstrap = ClientBootstrap.makeHTTPClientBootstrapBase(group: selectedEventLoop, host: request.host, port: request.port, configuration: self.configuration)
-
-            if let timeout = resolve(timeout: self.configuration.timeout.connect, deadline: deadline) {
-                bootstrap = bootstrap.connectTimeout(timeout)
-            }
-
-            let address = HTTPClient.resolveAddress(host: request.host, port: request.port, proxy: self.configuration.proxy)
-
-            return bootstrap.connect(host: address.host, port: address.port).flatMap { channel in
-                channel.pipeline.addSSLHandlerIfNeeded(for: key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap {
-                    channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes)
-                }.flatMap {
-                    let provider = ConnectionProvider.http1(HTTP1ConnectionProvider(key: key, configuration: self.configuration, initialConnection: Connection(key: key, channel: channel, parentPool: self), parentPool: self))
-                    providerPromise.succeed(provider)
-                    return provider.getConnection(preference: preference)
-                }
+        let provider: ConnectionProvider = self.connectionProvidersLock.withLock {
+            if let existing = self._connectionProviders[key] {
+                return existing
+            } else {
+                let http1Provider = ConnectionProvider.http1(HTTP1ConnectionProvider(key: key, eventLoop: eventLoop, configuration: self.configuration, parentPool: self))
+                self._connectionProviders[key] = http1Provider
+                return http1Provider
             }
         }
+
+        return provider.getConnection(preference: preference)
     }
 
     func release(_ connection: Connection) {
@@ -338,14 +325,13 @@ class ConnectionPool {
         ///     - configuration: The client configuration used globally by all requests
         ///     - initialConnection: The initial connection the pool initializes this provider with
         ///     - parentPool: The pool this provider belongs to
-        init(key: ConnectionPool.Key, configuration: HTTPClient.Configuration, initialConnection: Connection, parentPool: ConnectionPool) {
-            self.eventLoop = initialConnection.channel.eventLoop
+        init(key: ConnectionPool.Key, eventLoop: EventLoop, configuration: HTTPClient.Configuration, parentPool: ConnectionPool) {
+            self.eventLoop = eventLoop
             self.configuration = configuration
             self.key = key
             self.parentPool = parentPool
             self.isClosed = NIOAtomic.makeAtomic(value: false)
-            self.state = State(initialConnection: initialConnection)
-            self.configureCloseCallback(of: initialConnection)
+            self.state = State(eventLoop: eventLoop)
         }
 
         deinit {
@@ -479,9 +465,8 @@ class ConnectionPool {
             /// as soon as possible by the provider, in FIFO order.
             private var waiters: CircularBuffer<Waiter> = .init(initialCapacity: 8)
 
-            fileprivate init(initialConnection: Connection) {
-                self.availableConnections.append(initialConnection)
-                self.defaultEventLoop = initialConnection.channel.eventLoop
+            fileprivate init(eventLoop: EventLoop) {
+                self.defaultEventLoop = eventLoop
             }
 
             fileprivate mutating func connectionAction(for preference: HTTPClient.EventLoopPreference) -> ConnectionGetAction {
