@@ -71,6 +71,7 @@ extension HTTPClientTests {
             ("testResponseDelayGet", testResponseDelayGet),
             ("testIdleTimeoutNoReuse", testIdleTimeoutNoReuse),
             ("testStressGetClose", testStressGetClose),
+            ("testRepeatedRequestsWorkWhenServerAlwaysCloses", testRepeatedRequestsWorkWhenServerAlwaysCloses),
         ]
     }
 }
