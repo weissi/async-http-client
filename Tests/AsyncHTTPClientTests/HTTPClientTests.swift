@@ -933,7 +933,7 @@ class HTTPClientTests: XCTestCase {
         XCTAssertNoThrow(try httpClient.execute(request: req, deadline: .now() + .seconds(2)).wait())
         req.headers.add(name: "X-internal-delay", value: "2500")
         try httpClient.eventLoopGroup.next().scheduleTask(in: .milliseconds(250)) {}.futureResult.wait()
-        XCTAssertNoThrow(try httpClient.execute(request: req).timeout(after: .seconds(5)).wait())
+        XCTAssertNoThrow(try httpClient.execute(request: req).timeout(after: .seconds(10)).wait())
     }
 
     func testStressGetClose() throws {
@@ -952,7 +952,7 @@ class HTTPClientTests: XCTestCase {
             let req = try HTTPClient.Request(url: "http://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "5", "Connection": "close"])
             futureResults.append(httpClient.execute(request: req))
         }
-        XCTAssertNoThrow(try EventLoopFuture<HTTPClient.Response>.andAllComplete(futureResults, on: eventLoop).timeout(after: .seconds(3)).wait())
+        XCTAssertNoThrow(try EventLoopFuture<HTTPClient.Response>.andAllComplete(futureResults, on: eventLoop).timeout(after: .seconds(10)).wait())
     }
 
     func testRepeatedRequestsWorkWhenServerAlwaysCloses() {
