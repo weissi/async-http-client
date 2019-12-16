@@ -517,15 +517,8 @@ extension HTTPClient {
         func fail(_ error: Error) {
             if let connection = self.connection {
                 connection.channel.close().whenComplete { _ in
-                    connection.channel.pipeline.removeHandler(name: "taskHandler").whenComplete { result in
-                        switch result {
-                        case .success:
-                            connection.release()
-                            self.promise.fail(error)
-                        case .failure(let error):
-                            fatalError("Couldn't remove taskHandler: \(error)")
-                        }
-                    }
+                    connection.release()
+                    self.promise.fail(error)
                 }
             }
         }
@@ -584,7 +577,6 @@ extension TaskHandler {
         func doIt() {
             body(self.task, error)
             self.task.fail(error)
-            // self.task.promise.fail(error)
         }
 
         if self.task.eventLoop.inEventLoop {
