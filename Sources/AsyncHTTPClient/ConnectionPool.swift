@@ -176,6 +176,9 @@ class ConnectionPool {
         /// Wether the connection is currently leased or not
         var isLeased: NIOAtomic<Bool> = .makeAtomic(value: false)
 
+        /// Indicates that this connection is about to close
+        var isClosing: Bool = false
+
         /// Convenience property indicating wether the underlying `Channel` is active or not
         var isActive: Bool {
             return self.channel.isActive
@@ -399,7 +402,7 @@ class ConnectionPool {
                 if let firstWaiter = waiters.first {
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(firstWaiter.preference)
 
-                    guard connection.isActive else {
+                    guard connection.isActive, !connection.isClosing else {
                         return .makeConnectionAndComplete(channelEL, firstWaiter.promise)
                     }
 
@@ -417,7 +420,7 @@ class ConnectionPool {
 
                 } else {
                     self.leased -= 1
-                    if connection.isActive {
+                    if connection.isActive, !connection.isClosing {
                         self.availableConnections.append(connection)
                         connection.isLeased.store(false)
                     }

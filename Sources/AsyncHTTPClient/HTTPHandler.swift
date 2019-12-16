@@ -454,7 +454,7 @@ extension HTTPClient {
         let promise: EventLoopPromise<Response>
         var connection: ConnectionPool.Connection?
         private var cancelled: Bool
-        private let lock: Lock
+        let lock: Lock
 
         init(eventLoop: EventLoop) {
             self.eventLoop = eventLoop
@@ -583,7 +583,8 @@ extension TaskHandler {
                                                _ body: @escaping (HTTPClient.Task<Delegate.Response>, Err) -> Void) {
         func doIt() {
             body(self.task, error)
-            self.task.promise.fail(error)
+            self.task.fail(error)
+            // self.task.promise.fail(error)
         }
 
         if self.task.eventLoop.inEventLoop {
@@ -727,6 +728,16 @@ extension TaskHandler: ChannelDuplexHandler {
         let response = self.unwrapInboundIn(data)
         switch response {
         case .head(let head):
+            if !head.isKeepAlive {
+                self.task.lock.withLock {
+                    if let connection = self.task.connection {
+                        connection.isClosing = true
+                    } else {
+                        preconditionFailure("There should always be a connection at this point")
+                    }
+                }
+            }
+
             if let redirectURL = redirectHandler?.redirectTarget(status: head.status, headers: head.headers) {
                 self.state = .redirected(head, redirectURL)
             } else {
@@ -828,6 +839,13 @@ extension TaskHandler: ChannelDuplexHandler {
         default:
             self.state = .end
             self.failTaskAndNotifyDelegate(error: error, self.delegate.didReceiveError)
+        }
+    }
+
+    func handlerAdded(context: ChannelHandlerContext) {
+        guard context.channel.isActive else {
+            self.failTaskAndNotifyDelegate(error: HTTPClientError.remoteConnectionClosed, self.delegate.didReceiveError)
+            return
         }
     }
 }
