@@ -214,9 +214,6 @@ class ConnectionPool {
         /// The lock used to access and modify the `state` property
         private let stateLock = Lock()
 
-        /// Wether this provider is closed or not
-        private var isClosed: NIOAtomic<Bool>
-
         /// The maximum number of concurrent connections to a given (host, scheme, port)
         private let maximumConcurrentConnections: Int = 8
 
@@ -235,7 +232,6 @@ class ConnectionPool {
             self.configuration = configuration
             self.key = key
             self.parentPool = parentPool
-            self.isClosed = NIOAtomic.makeAtomic(value: false)
             self.state = State(eventLoop: eventLoop)
         }
 
