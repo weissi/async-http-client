@@ -518,7 +518,6 @@ extension HTTPClient {
         func fail(_ error: Error) {
             if let connection = self.connection {
                 connection.channel.close().whenComplete { _ in
-                    connection.release()
                     self.promise.fail(error)
                 }
             }
@@ -623,9 +622,8 @@ extension TaskHandler {
                 let result = try body(self.task)
 
                 self.task.succeed(promise: promise, with: result, delegateType: Delegate.self)
-                promise?.succeed(result)
             } catch {
-                promise?.fail(error)
+                self.task.fail(error)
             }
         }
 

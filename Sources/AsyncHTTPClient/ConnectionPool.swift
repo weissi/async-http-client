@@ -244,6 +244,7 @@ class ConnectionPool {
         }
 
         func getConnection(preference: HTTPClient.EventLoopPreference) -> EventLoopFuture<Connection> {
+            self.preconditionIsOpened()
             let action = self.stateLock.withLock { self.state.connectionAction(for: preference) }
             switch action {
             case .leaseConnection(let connection):
@@ -256,6 +257,7 @@ class ConnectionPool {
         }
 
         func release(connection: Connection) {
+            self.preconditionIsOpened()
             let action = self.stateLock.withLock { self.state.releaseAction(for: connection) }
             switch action {
             case .succeed(let promise):
@@ -290,6 +292,7 @@ class ConnectionPool {
         }
 
         private func makeConnection(on eventLoop: EventLoop) -> EventLoopFuture<Connection> {
+            self.preconditionIsOpened()
             let bootstrap = ClientBootstrap.makeHTTPClientBootstrapBase(group: eventLoop, host: self.key.host, port: self.key.port, configuration: self.configuration) { channel in
                 channel.pipeline.addSSLHandlerIfNeeded(for: self.key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap {
                     channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes)
@@ -330,6 +333,7 @@ class ConnectionPool {
 
         func syncClose(requiresCleanClose: Bool) throws {
             let availableConnections = try self.stateLock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in
+                self.state.isClosed = true
                 if requiresCleanClose {
                     guard self.state.leased == 0 else {
                         throw HTTPClientError.uncleanShutdown
@@ -345,6 +349,12 @@ class ConnectionPool {
                 throw error
             }
             self.stateLock.withLock { self.state.availableConnections.removeAll() }
+        }
+
+        private func preconditionIsOpened() {
+            self.stateLock.withLock {
+                precondition(self.state.isClosed == false, "Attempting to use closed HTTP1ConnectionProvider")
+            }
         }
 
         private struct State {
@@ -365,6 +375,8 @@ class ConnectionPool {
             /// whose associated promise is stored in `Waiter`. The promise is completed
             /// as soon as possible by the provider, in FIFO order.
             private var waiters: CircularBuffer<Waiter> = .init(initialCapacity: 8)
+
+            fileprivate var isClosed: Bool = false
 
             fileprivate init(eventLoop: EventLoop) {
                 self.defaultEventLoop = eventLoop
