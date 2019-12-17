@@ -93,3 +93,11 @@ extension CircularBuffer {
         return try self.swapRemove(where: predicate) ?? self.popFirst()
     }
 }
+
+extension ConnectionPool.Connection {
+    func removeHandler<Handler: RemovableChannelHandler>(_ type: Handler.Type) -> EventLoopFuture<Void> {
+        return self.channel.pipeline.handler(type: type).flatMap { handler in
+            self.channel.pipeline.removeHandler(handler)
+        }.recover { _ in }
+    }
+}

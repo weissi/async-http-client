@@ -17,6 +17,7 @@ import NIO
 import NIOConcurrencyHelpers
 import NIOFoundationCompat
 import NIOHTTP1
+import NIOHTTPCompression
 import NIOSSL
 
 extension HTTPClient {
@@ -496,12 +497,12 @@ extension HTTPClient {
             }
         }
 
-        func succeed(promise: EventLoopPromise<Response>?, with value: Response) {
+        func succeed<Delegate: HTTPClientResponseDelegate>(promise: EventLoopPromise<Response>?, with value: Response, delegateType: Delegate.Type) {
             if let connection = self.connection {
-                connection.channel.pipeline.removeHandler(name: "decompressHandler").recover { _ in }.flatMap {
-                    connection.channel.pipeline.removeHandler(name: "timeoutHandler")
-                }.recover { _ in }.flatMap { _ in
-                    connection.channel.pipeline.removeHandler(name: "taskHandler")
+                connection.removeHandler(NIOHTTPResponseDecompressor.self).flatMap {
+                    connection.removeHandler(IdleStateHandler.self)
+                }.flatMap {
+                    connection.removeHandler(TaskHandler<Delegate>.self)
                 }.whenComplete { result in
                     switch result {
                     case .success:
@@ -621,7 +622,7 @@ extension TaskHandler {
             do {
                 let result = try body(self.task)
 
-                self.task.succeed(promise: promise, with: result)
+                self.task.succeed(promise: promise, with: result, delegateType: Delegate.self)
                 promise?.succeed(result)
             } catch {
                 promise?.fail(error)
