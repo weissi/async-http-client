@@ -138,6 +138,8 @@ class ConnectionPool {
     /// and has a certain "lease state" (see the `isLeased` property).
     /// The role of `Connection` is to model this by storing a `Channel` alongside its associated properties
     /// so that they can be passed around together.
+    ///
+    /// - Warning: `Connection` properties are not thread-safe and should be used with proper synchronization
     class Connection {
         init(key: Key, channel: Channel, parentPool: ConnectionPool) {
             self.key = key
@@ -174,7 +176,7 @@ class ConnectionPool {
         let channel: Channel
 
         /// Wether the connection is currently leased or not
-        var isLeased: NIOAtomic<Bool> = .makeAtomic(value: false)
+        var isLeased: Bool = false
 
         /// Indicates that this connection is about to close
         var isClosing: Bool = false
@@ -302,7 +304,7 @@ class ConnectionPool {
             return bootstrap.connect(host: address.host, port: address.port).map { channel in
                 let connection = Connection(key: self.key, channel: channel, parentPool: self.parentPool)
                 self.configureCloseCallback(of: connection)
-                connection.isLeased.store(true)
+                connection.isLeased = true
                 return connection
             }
         }
@@ -388,7 +390,7 @@ class ConnectionPool {
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(preference)
 
                     if let connection = availableConnections.swapRemove(where: { $0.channel.eventLoop === channelEL }) {
-                        connection.isLeased.store(true)
+                        connection.isLeased = true
                         return .leaseConnection(connection)
                     } else {
                         if requiresSpecifiedEL {
@@ -430,14 +432,14 @@ class ConnectionPool {
                     self.leased -= 1
                     if connection.isActive, !connection.isClosing {
                         self.availableConnections.append(connection)
-                        connection.isLeased.store(false)
+                        connection.isLeased = false
                     }
                     return self.providerMustClose() ? .removeProvider : .none
                 }
             }
 
             fileprivate mutating func removeClosedConnection(_ connection: Connection) -> ClosedConnectionRemoveAction {
-                if connection.isLeased.load() {
+                if connection.isLeased {
                     self.leased -= 1
                     if let firstWaiter = self.waiters.popFirst() {
                         let (el, _) = self.resolvePreference(firstWaiter.preference)
