@@ -32,7 +32,6 @@ extension HTTPClientTests {
             ("testGetWithDifferentEventLoopBackpressure", testGetWithDifferentEventLoopBackpressure),
             ("testPost", testPost),
             ("testGetHttps", testGetHttps),
-            ("testGetHttpsWithIP", testGetHttpsWithIP),
             ("testPostHttps", testPostHttps),
             ("testHttpRedirect", testHttpRedirect),
             ("testHttpHostRedirect", testHttpHostRedirect),
