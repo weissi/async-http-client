@@ -182,7 +182,7 @@ class ConnectionPool {
         var isClosing: Bool = false
 
         /// Convenience property indicating wether the underlying `Channel` is active or not
-        var isActive: Bool {
+        var isActiveEstimation: Bool {
             return self.channel.isActive
         }
     }
@@ -412,7 +412,7 @@ class ConnectionPool {
                 if let firstWaiter = waiters.first {
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(firstWaiter.preference)
 
-                    guard connection.isActive, !connection.isClosing else {
+                    guard connection.isActiveEstimation, !connection.isClosing else {
                         return .makeConnectionAndComplete(channelEL, firstWaiter.promise)
                     }
 
@@ -430,7 +430,7 @@ class ConnectionPool {
 
                 } else {
                     self.leased -= 1
-                    if connection.isActive, !connection.isClosing {
+                    if connection.isActiveEstimation, !connection.isClosing {
                         self.availableConnections.append(connection)
                         connection.isLeased = false
                     }
