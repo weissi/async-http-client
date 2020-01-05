@@ -490,8 +490,7 @@ extension ChannelPipeline {
         do {
             let tlsConfiguration = tlsConfiguration ?? TLSConfiguration.forClient()
             let context = try NIOSSLContext(configuration: tlsConfiguration)
-            return self.addHandler(try NIOSSLClientHandler(context: context, serverHostname: request.host.isIPAddress ? nil : request.host),
-                                   position: .first)
+            return self.addHandler(try NIOSSLClientHandler(context: context, serverHostname: key.host.isIPAddress ? nil : key.host))
         } catch {
             return self.eventLoop.makeFailedFuture(error)
         }
