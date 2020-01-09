@@ -282,9 +282,6 @@ class ConnectionPool {
                     }
                 }
 
-            case .removeProvider:
-                break
-
             case .none:
                 break
             }
@@ -318,8 +315,6 @@ class ConnectionPool {
                     switch action {
                     case .none:
                         break
-                    case .removeProvider:
-                        self.parentPool[self.key] = nil
                     case .makeConnectionAndComplete(let el, let promise):
                         self.makeConnection(on: el).cascade(to: promise)
                     }
@@ -440,7 +435,7 @@ class ConnectionPool {
 
                     if self.providerMustClose() {
                         self.removeFromPool()
-                        return .removeProvider
+                        return .none
                     } else {
                         return .none
                     }
@@ -458,7 +453,7 @@ class ConnectionPool {
                 }
                 if self.providerMustClose() {
                     self.removeFromPool()
-                    return .removeProvider
+                    return .none
                 } else {
                     return .none
                 }
@@ -500,13 +495,11 @@ class ConnectionPool {
                 case succeed(EventLoopPromise<Connection>)
                 case makeConnectionAndComplete(EventLoop, EventLoopPromise<Connection>)
                 case replaceConnection(EventLoop)
-                case removeProvider
                 case none
             }
 
             fileprivate enum ClosedConnectionRemoveAction {
                 case none
-                case removeProvider
                 case makeConnectionAndComplete(EventLoop, EventLoopPromise<Connection>)
             }
 
