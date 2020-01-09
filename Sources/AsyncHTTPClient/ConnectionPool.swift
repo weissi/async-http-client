@@ -273,11 +273,8 @@ class ConnectionPool {
                     case .success(let connection):
                         self.release(connection: connection)
                     case .failure(let error):
-                        let (promise, providerMustClose) = self.stateLock.withLock { self.state.popConnectionPromiseToFail() }
-                        if providerMustClose {
-                            self.stateLock.withLock {
-                                self.state.removeFromPool()
-                            }
+                        let promise = self.stateLock.withLock {
+                            self.state.popConnectionPromiseToFail()
                         }
                         promise?.fail(error)
                     }
@@ -437,7 +434,7 @@ class ConnectionPool {
                     if self.providerMustClose() {
                         self.removeFromPool()
                     }
-                    
+
                     return .none
                 }
             }
@@ -451,16 +448,19 @@ class ConnectionPool {
                 } else {
                     self.availableConnections.swapRemove(where: { $0 === connection })
                 }
-                
+
                 if self.providerMustClose() {
                     self.removeFromPool()
                 }
-                
+
                 return .none
             }
 
-            fileprivate mutating func popConnectionPromiseToFail() -> (promise: EventLoopPromise<Connection>?, providerMustClose: Bool) {
-                return (self.waiters.popFirst()?.promise, self.providerMustClose())
+            fileprivate mutating func popConnectionPromiseToFail() -> EventLoopPromise<Connection>? {
+                if self.providerMustClose() {
+                    self.removeFromPool()
+                }
+                return self.waiters.popFirst()?.promise
             }
 
             private func providerMustClose() -> Bool {
