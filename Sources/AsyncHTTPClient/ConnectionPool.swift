@@ -436,10 +436,9 @@ class ConnectionPool {
 
                     if self.providerMustClose() {
                         self.removeFromPool()
-                        return .none
-                    } else {
-                        return .none
                     }
+                    
+                    return .none
                 }
             }
 
@@ -452,12 +451,12 @@ class ConnectionPool {
                 } else {
                     self.availableConnections.swapRemove(where: { $0 === connection })
                 }
+                
                 if self.providerMustClose() {
                     self.removeFromPool()
-                    return .none
-                } else {
-                    return .none
                 }
+                
+                return .none
             }
 
             fileprivate mutating func popConnectionPromiseToFail() -> (promise: EventLoopPromise<Connection>?, providerMustClose: Bool) {
