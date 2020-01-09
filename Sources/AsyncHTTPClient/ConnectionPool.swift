@@ -274,11 +274,12 @@ class ConnectionPool {
                         self.release(connection: connection)
                     case .failure(let error):
                         let (promise, providerMustClose) = self.stateLock.withLock { self.state.popConnectionPromiseToFail() }
-                        promise?.fail(error)
                         if providerMustClose {
-                            // FIXME: Might be unsafe
-                            self.parentPool[self.key] = nil
+                            self.stateLock.withLock {
+                                self.state.removeFromPool()
+                            }
                         }
+                        promise?.fail(error)
                     }
                 }
 
@@ -469,7 +470,7 @@ class ConnectionPool {
                 }
             }
 
-            private mutating func removeFromPool() {
+            fileprivate mutating func removeFromPool() {
                 self.parentPool[self.key] = nil
                 self.isClosed = true
             }
