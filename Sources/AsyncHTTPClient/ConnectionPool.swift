@@ -89,10 +89,8 @@ class ConnectionPool {
     }
 
     func release(_ connection: Connection) {
-        self.connectionProvidersLock.withLock {
-            if let provider = self._connectionProviders[connection.key] {
-                provider.release(connection: connection)
-            }
+        if let connectionProvider = self[connection.key] {
+            connectionProvider.release(connection: connection)
         }
     }
 
@@ -234,15 +232,14 @@ class ConnectionPool {
             self.configuration = configuration
             self.key = key
             self.parentPool = parentPool
-            self.state = State(eventLoop: eventLoop)
+            self.state = State(eventLoop: eventLoop, parentPool: parentPool, key: key)
         }
 
         deinit {
-            // FIXME: Add the checks back
-            /*
-             assert(availableConnections.isEmpty, "Available connections should be empty before deinit")
-             assert(leased == 0, "All leased connections should have been returned before deinit")
-             */
+            self.stateLock.withLock {
+                assert(self.state.availableConnections.isEmpty, "Available connections should be empty before deinit")
+                assert(self.state.leased == 0, ":( All leased connections should have been returned before deinit \(ObjectIdentifier(self)) but there remains \(self.state.leased) \(Thread.current)")
+            }
         }
 
         func getConnection(preference: HTTPClient.EventLoopPreference) -> EventLoopFuture<Connection> {
@@ -279,13 +276,13 @@ class ConnectionPool {
                         let (promise, providerMustClose) = self.stateLock.withLock { self.state.popConnectionPromiseToFail() }
                         promise?.fail(error)
                         if providerMustClose {
+                            // FIXME: Might be unsafe
                             self.parentPool[self.key] = nil
                         }
                     }
                 }
 
             case .removeProvider:
-                // FIXME: Need to close the pool
                 break
 
             case .none:
@@ -380,8 +377,14 @@ class ConnectionPool {
 
             fileprivate var isClosed: Bool = false
 
-            fileprivate init(eventLoop: EventLoop) {
+            private let parentPool: ConnectionPool
+
+            private let key: Key
+
+            fileprivate init(eventLoop: EventLoop, parentPool: ConnectionPool, key: Key) {
                 self.defaultEventLoop = eventLoop
+                self.parentPool = parentPool
+                self.key = key
             }
 
             fileprivate mutating func connectionAction(for preference: HTTPClient.EventLoopPreference) -> ConnectionGetAction {
@@ -429,18 +432,23 @@ class ConnectionPool {
                     }
 
                 } else {
+                    connection.isLeased = false
                     self.leased -= 1
                     if connection.isActiveEstimation, !connection.isClosing {
                         self.availableConnections.append(connection)
-                        connection.isLeased = false
                     }
-                    return self.providerMustClose() ? .removeProvider : .none
+
+                    if self.providerMustClose() {
+                        self.removeFromPool()
+                        return .removeProvider
+                    } else {
+                        return .none
+                    }
                 }
             }
 
             fileprivate mutating func removeClosedConnection(_ connection: Connection) -> ClosedConnectionRemoveAction {
                 if connection.isLeased {
-                    self.leased -= 1
                     if let firstWaiter = self.waiters.popFirst() {
                         let (el, _) = self.resolvePreference(firstWaiter.preference)
                         return .makeConnectionAndComplete(el, firstWaiter.promise)
@@ -448,7 +456,12 @@ class ConnectionPool {
                 } else {
                     self.availableConnections.swapRemove(where: { $0 === connection })
                 }
-                return self.providerMustClose() ? .removeProvider : .none
+                if self.providerMustClose() {
+                    self.removeFromPool()
+                    return .removeProvider
+                } else {
+                    return .none
+                }
             }
 
             fileprivate mutating func popConnectionPromiseToFail() -> (promise: EventLoopPromise<Connection>?, providerMustClose: Bool) {
@@ -456,7 +469,14 @@ class ConnectionPool {
             }
 
             private func providerMustClose() -> Bool {
-                return self.leased == 0 && self.availableConnections.isEmpty && self.waiters.isEmpty
+                return self.parentPool.connectionProvidersLock.withLock {
+                    !self.isClosed && self.leased == 0 && self.availableConnections.isEmpty && self.waiters.isEmpty
+                }
+            }
+
+            private mutating func removeFromPool() {
+                self.parentPool[self.key] = nil
+                self.isClosed = true
             }
 
             private func resolvePreference(_ preference: HTTPClient.EventLoopPreference) -> (EventLoop, Bool) {
