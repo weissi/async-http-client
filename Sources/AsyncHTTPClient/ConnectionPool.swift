@@ -325,6 +325,7 @@ class ConnectionPool {
 
         func syncClose(requiresCleanClose: Bool) throws {
             let availableConnections = try self.stateLock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in
+                assert(!self.state.isClosed, "Calling syncClose on an already closed provider")
                 self.state.isClosed = true
                 if requiresCleanClose {
                     guard self.state.leased == 0 else {
