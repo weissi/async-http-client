@@ -33,7 +33,7 @@ public final class HTTPClientCopyingDelegate: HTTPClientResponseDelegate {
 
     let chunkHandler: (ByteBuffer) -> EventLoopFuture<Void>
 
-    init(chunkHandler: @escaping (ByteBuffer) -> EventLoopFuture<Void>) {
+    public init(chunkHandler: @escaping (ByteBuffer) -> EventLoopFuture<Void>) {
         self.chunkHandler = chunkHandler
     }
 
