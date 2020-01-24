@@ -77,10 +77,16 @@ class ConnectionPool {
 
         let provider: HTTP1ConnectionProvider = self.connectionProvidersLock.withLock {
             if let existing = self._connectionProviders[key] {
+                existing.stateLock.withLock {
+                    existing.state.pending += 1
+                }
                 return existing
             } else {
                 let http1Provider = HTTP1ConnectionProvider(key: key, eventLoop: eventLoop, configuration: self.configuration, parentPool: self)
                 self._connectionProviders[key] = http1Provider
+                http1Provider.stateLock.withLock {
+                    http1Provider.state.pending += 1
+                }
                 return http1Provider
             }
         }
@@ -209,10 +215,10 @@ class ConnectionPool {
         /// This property holds data structures representing the current state of the provider
         /// - Warning: This type isn't thread safe and should be accessed with proper
         /// synchronization (see the `stateLock` property)
-        private var state: State
+        fileprivate var state: State
 
         /// The lock used to access and modify the `state` property
-        private let stateLock = Lock()
+        fileprivate let stateLock = Lock()
 
         /// The maximum number of concurrent connections to a given (host, scheme, port)
         private let maximumConcurrentConnections: Int = 8
@@ -350,7 +356,7 @@ class ConnectionPool {
             }
         }
 
-        private struct State {
+        fileprivate struct State {
             /// The default `EventLoop` to use for this `HTTP1ConnectionProvider`
             private let defaultEventLoop: EventLoop
 
@@ -370,6 +376,8 @@ class ConnectionPool {
             private var waiters: CircularBuffer<Waiter> = .init(initialCapacity: 8)
 
             fileprivate var isClosed: Bool = false
+            
+            fileprivate var pending: Int = 0
 
             private let parentPool: ConnectionPool
 
@@ -382,6 +390,9 @@ class ConnectionPool {
             }
 
             fileprivate mutating func connectionAction(for preference: HTTPClient.EventLoopPreference) -> ConnectionGetAction {
+                self.parentPool.connectionProvidersLock.withLock {
+                    self.pending -= 1
+                }
                 if self.leased < self.maximumConcurrentConnections {
                     self.leased += 1
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(preference)
@@ -466,7 +477,7 @@ class ConnectionPool {
 
             private func providerMustClose() -> Bool {
                 return self.parentPool.connectionProvidersLock.withLock {
-                    !self.isClosed && self.leased == 0 && self.availableConnections.isEmpty && self.waiters.isEmpty
+                    self.pending == 0 && !self.isClosed && self.leased == 0 && self.availableConnections.isEmpty && self.waiters.isEmpty
                 }
             }
 
