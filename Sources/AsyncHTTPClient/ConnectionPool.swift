@@ -382,7 +382,7 @@ class ConnectionPool {
             private var waiters: CircularBuffer<Waiter> = .init(initialCapacity: 8)
 
             fileprivate var isClosed: Bool = false
-            
+
             fileprivate var pending: Int = 0
 
             private let parentPool: ConnectionPool

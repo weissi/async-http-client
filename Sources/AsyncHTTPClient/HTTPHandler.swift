@@ -524,11 +524,11 @@ extension HTTPClient {
                 }.flatMapError { error in
                     fatalError("Couldn't remove taskHandler: \(error)")
                 }
-                
+
             } else {
                 // assertionFailure("Attempting to release without an asosciated connection")
                 // FIXME: See why this fails
-                return eventLoop.makeSucceededFuture(())
+                return self.eventLoop.makeSucceededFuture(())
             }
         }
     }
