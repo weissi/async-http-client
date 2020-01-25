@@ -31,6 +31,8 @@ class ConnectionPool {
     /// The lock used by the connection pool used to ensure correct synchronization of accesses to `_connectionProviders`
     ///
     /// Accesses that only need synchronization for the span of a get or set can use the subscript instead of this property
+    ///
+    /// - Warning: This lock should always be acquired *before* `HTTP1ConnectionProvider`s `stateLock` if used in combination with it.
     private let connectionProvidersLock = Lock()
 
     init(configuration: HTTPClient.Configuration) {
@@ -218,6 +220,8 @@ class ConnectionPool {
         fileprivate var state: State
 
         /// The lock used to access and modify the `state` property
+        ///
+        /// - Warning: This lock should always be acquired *after* `ConnectionPool`s `connectionProvidersLock` if used in combination with it.
         fileprivate let stateLock = Lock()
 
         /// The maximum number of concurrent connections to a given (host, scheme, port)
