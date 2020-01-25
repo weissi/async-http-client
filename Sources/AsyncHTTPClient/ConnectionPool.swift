@@ -263,7 +263,9 @@ class ConnectionPool {
 
         func release(connection: Connection) {
             self.preconditionIsOpened()
-            let action = self.stateLock.withLock { self.state.releaseAction(for: connection) }
+            let action = self.parentPool.connectionProvidersLock.withLock {
+                self.stateLock.withLock { self.state.releaseAction(for: connection) }
+            }
             switch action {
             case .succeed(let promise):
                 promise.succeed(connection)
@@ -279,8 +281,10 @@ class ConnectionPool {
                     case .success(let connection):
                         self.release(connection: connection)
                     case .failure(let error):
-                        let promise = self.stateLock.withLock {
-                            self.state.popConnectionPromiseToFail()
+                        let promise = self.parentPool.connectionProvidersLock.withLock {
+                            self.stateLock.withLock {
+                                self.state.popConnectionPromiseToFail()
+                            }
                         }
                         promise?.fail(error)
                     }
@@ -315,7 +319,9 @@ class ConnectionPool {
             connection.channel.closeFuture.whenComplete { result in
                 switch result {
                 case .success:
-                    let action = self.stateLock.withLock { self.state.removeClosedConnection(connection) }
+                    let action = self.parentPool.connectionProvidersLock.withLock {
+                        self.stateLock.withLock { self.state.removeClosedConnection(connection) }
+                    }
                     switch action {
                     case .none:
                         break
@@ -474,13 +480,11 @@ class ConnectionPool {
             }
 
             private func providerMustClose() -> Bool {
-                return self.parentPool.connectionProvidersLock.withLock {
-                    self.pending == 0 && !self.isClosed && self.leased == 0 && self.availableConnections.isEmpty && self.waiters.isEmpty
-                }
+                return self.pending == 0 && !self.isClosed && self.leased == 0 && self.availableConnections.isEmpty && self.waiters.isEmpty
             }
 
             fileprivate mutating func removeFromPool() {
-                self.parentPool[self.key] = nil
+                self.parentPool._connectionProviders[self.key] = nil
                 self.isClosed = true
             }
 
