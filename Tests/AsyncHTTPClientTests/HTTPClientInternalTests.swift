@@ -97,7 +97,7 @@ class HTTPClientInternalTests: XCTestCase {
         let httpBin = HTTPBin()
         let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
         defer {
-            XCTAssertNoThrow(try httpClient.syncShutdown())
+            XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
             XCTAssertNoThrow(try httpBin.shutdown())
         }
 
@@ -127,7 +127,7 @@ class HTTPClientInternalTests: XCTestCase {
         let httpBin = HTTPBin()
         let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
         defer {
-            XCTAssertNoThrow(try httpClient.syncShutdown())
+            XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
             XCTAssertNoThrow(try httpBin.shutdown())
         }
 
@@ -212,7 +212,7 @@ class HTTPClientInternalTests: XCTestCase {
         let httpBin = HTTPBin(channelPromise: promise)
 
         defer {
-            XCTAssertNoThrow(try httpClient.syncShutdown())
+            XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
             XCTAssertNoThrow(try httpBin.shutdown())
         }
 
@@ -354,7 +354,7 @@ class HTTPClientInternalTests: XCTestCase {
         let promise: EventLoopPromise<Channel> = httpClient.eventLoopGroup.next().makePromise()
         let httpBin = HTTPBin(channelPromise: promise)
         defer {
-            XCTAssertNoThrow(try httpClient.syncShutdown())
+            XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
             XCTAssertNoThrow(try httpBin.shutdown())
         }
 
@@ -433,7 +433,7 @@ class HTTPClientInternalTests: XCTestCase {
         let httpClient = HTTPClient(eventLoopGroupProvider: .createNew,
                                     configuration: HTTPClient.Configuration(certificateVerification: .none))
         defer {
-            XCTAssertNoThrow(try httpClient.syncShutdown())
+            XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
             XCTAssertNoThrow(try httpBin.shutdown())
         }
 

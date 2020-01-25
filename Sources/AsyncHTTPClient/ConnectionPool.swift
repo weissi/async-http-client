@@ -390,9 +390,7 @@ class ConnectionPool {
             }
 
             fileprivate mutating func connectionAction(for preference: HTTPClient.EventLoopPreference) -> ConnectionGetAction {
-                self.parentPool.connectionProvidersLock.withLock {
-                    self.pending -= 1
-                }
+                self.pending -= 1
                 if self.leased < self.maximumConcurrentConnections {
                     self.leased += 1
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(preference)

@@ -498,41 +498,37 @@ extension HTTPClient {
         }
 
         func succeed<Delegate: HTTPClientResponseDelegate>(promise: EventLoopPromise<Response>?, with value: Response, delegateType: Delegate.Type) {
+            self.releaseAssociatedConnection(delegateType: delegateType).whenSuccess {
+                promise?.succeed(value)
+            }
+        }
+
+        func fail<Delegate: HTTPClientResponseDelegate>(with error: Error, delegateType: Delegate.Type) {
             if let connection = self.connection {
-                connection.removeHandler(NIOHTTPResponseDecompressor.self).flatMap {
+                connection.channel.close().whenComplete { _ in
+                    self.releaseAssociatedConnection(delegateType: delegateType).whenComplete { _ in
+                        self.promise.fail(error)
+                    }
+                }
+            }
+        }
+
+        func releaseAssociatedConnection<Delegate: HTTPClientResponseDelegate>(delegateType: Delegate.Type) -> EventLoopFuture<Void> {
+            if let connection = self.connection {
+                return connection.removeHandler(NIOHTTPResponseDecompressor.self).flatMap {
                     connection.removeHandler(IdleStateHandler.self)
                 }.flatMap {
                     connection.removeHandler(TaskHandler<Delegate>.self)
-                }.whenComplete { result in
-                    switch result {
-                    case .success:
-                        connection.release()
-                        promise?.succeed(value)
-                    case .failure(let error):
-                        fatalError("Couldn't remove taskHandler: \(error)")
-                    }
+                }.map {
+                    connection.release()
+                }.flatMapError { error in
+                    fatalError("Couldn't remove taskHandler: \(error)")
                 }
-            }
-        }
-
-        func fail(_ error: Error) {
-            if let connection = self.connection {
-                connection.channel.close().whenComplete { _ in
-                    self.promise.fail(error)
-                }
-            }
-        }
-
-        func releaseAssociatedConnection() {
-            if let connection = self.connection {
-                connection.channel.pipeline.removeHandler(name: "taskHandler").whenComplete { result in
-                    switch result {
-                    case .success:
-                        connection.release()
-                    case .failure(let error):
-                        fatalError("Couldn't remove taskHandler: \(error)")
-                    }
-                }
+                
+            } else {
+                // assertionFailure("Attempting to release without an asosciated connection")
+                // FIXME: See why this fails
+                return eventLoop.makeSucceededFuture(())
             }
         }
     }
@@ -576,7 +572,7 @@ extension TaskHandler {
                                                _ body: @escaping (HTTPClient.Task<Delegate.Response>, Err) -> Void) {
         func doIt() {
             body(self.task, error)
-            self.task.fail(error)
+            self.task.fail(with: error, delegateType: Delegate.self)
         }
 
         if self.task.eventLoop.inEventLoop {
@@ -623,7 +619,7 @@ extension TaskHandler {
 
                 self.task.succeed(promise: promise, with: result, delegateType: Delegate.self)
             } catch {
-                self.task.fail(error)
+                self.task.fail(with: error, delegateType: Delegate.self)
             }
         }
 
@@ -755,8 +751,9 @@ extension TaskHandler: ChannelDuplexHandler {
             switch self.state {
             case .redirected(let head, let redirectURL):
                 self.state = .end
-                self.redirectHandler?.redirect(status: head.status, to: redirectURL, promise: self.task.promise)
-                context.close(promise: nil)
+                self.task.releaseAssociatedConnection(delegateType: Delegate.self).whenSuccess {
+                    self.redirectHandler?.redirect(status: head.status, to: redirectURL, promise: self.task.promise)
+                }
             default:
                 self.state = .end
                 self.callOutToDelegate(promise: self.task.promise, self.delegate.didFinishRequest)
