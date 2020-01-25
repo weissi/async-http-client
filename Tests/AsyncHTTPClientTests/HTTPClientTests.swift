@@ -743,7 +743,7 @@ class HTTPClientTests: XCTestCase {
                 }
             }
         }
-        let timeout = DispatchTime.now().advanced(by: DispatchTimeInterval.seconds(240))
+        let timeout = DispatchTime.now() + .seconds(180)
         switch g.wait(timeout: timeout) {
         case .success:
             break
