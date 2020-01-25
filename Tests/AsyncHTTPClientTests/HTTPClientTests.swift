@@ -743,7 +743,13 @@ class HTTPClientTests: XCTestCase {
                 }
             }
         }
-        g.wait()
+        let timeout = DispatchTime.now().advanced(by: DispatchTimeInterval.seconds(240))
+        switch g.wait(timeout: timeout) {
+        case .success:
+            break
+        case .timedOut:
+            XCTFail("Timed out")
+        }
     }
 
     func testWorksWith500Error() {
