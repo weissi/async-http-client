@@ -526,8 +526,8 @@ extension HTTPClient {
                 }
 
             } else {
-                // assertionFailure("Attempting to release without an asosciated connection")
-                // FIXME: See why this fails
+                // TODO: We could add an assertion to check that we never reach this
+                // which should never happen outside of internal unit tests
                 return self.eventLoop.makeSucceededFuture(())
             }
         }
