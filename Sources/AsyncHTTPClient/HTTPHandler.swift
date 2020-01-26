@@ -483,8 +483,10 @@ extension HTTPClient {
                 if !cancelled {
                     cancelled = true
                     return self.connection?.channel
+                } else {
+                    assertionFailure("Calling cancel() on an already canceled task")
+                    return nil
                 }
-                return nil
             }
             channel?.triggerUserOutboundEvent(TaskCancelEvent(), promise: nil)
         }
@@ -493,6 +495,9 @@ extension HTTPClient {
         func setConnection(_ connection: ConnectionPool.Connection) -> ConnectionPool.Connection {
             return self.lock.withLock {
                 self.connection = connection
+                if self.cancelled {
+                    connection.channel.triggerUserOutboundEvent(TaskCancelEvent(), promise: nil)
+                }
                 return connection
             }
         }

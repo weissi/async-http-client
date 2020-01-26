@@ -317,6 +317,37 @@ class HTTPClientTests: XCTestCase {
             }
         }
     }
+    
+    func testStressCancel() throws {
+        let httpBin = HTTPBin()
+        let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
+        
+        defer {
+            XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
+            XCTAssertNoThrow(try httpBin.shutdown())
+        }
+                
+        // FIXME: Also check this with ok and no delay, and wait
+        let request = try Request(url: "https://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "40"])
+        let tasks = (1...100).map { _ -> HTTPClient.Task<TestHTTPDelegate.Response> in
+            let task = httpClient.execute(request: request, delegate: TestHTTPDelegate())
+            task.cancel()
+            return task
+        }
+        
+        for task in tasks {
+            switch (Result { try task.futureResult.timeout(after: .seconds(10)).wait() }) {
+            case .success(_):
+                XCTFail("Shouldn't succeed")
+                return
+            case .failure(let error):
+                guard let clientError = error as? HTTPClientError, clientError == .cancelled  else {
+                    XCTFail("Unexpected error: \(error)")
+                    return
+                }
+            }
+        }
+    }
 
     func testHTTPClientAuthorization() {
         var authorization = HTTPClient.Authorization.basic(username: "aladdin", password: "opensesame")
@@ -923,6 +954,37 @@ class HTTPClientTests: XCTestCase {
         }
         XCTAssertNoThrow(try EventLoopFuture<HTTPClient.Response>.andAllSucceed(futureResults, on: eventLoop).wait())
     }
+    
+    func testStressGetHttpsSSLError() throws {
+        let httpBin = HTTPBin()
+        let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
+        
+        defer {
+            XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
+            XCTAssertNoThrow(try httpBin.shutdown())
+        }
+                
+        let request = try Request(url: "https://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "40"])
+        let tasks = (1...100).map { _ -> HTTPClient.Task<TestHTTPDelegate.Response> in
+            let task = httpClient.execute(request: request, delegate: TestHTTPDelegate())
+            task.cancel()
+            return task
+        }
+        
+        for task in tasks {
+            switch (Result { try task.futureResult.timeout(after: .seconds(10)).wait() }) {
+            case .success(_):
+                XCTFail("Shouldn't succeed")
+                return
+            case .failure(let error):
+                guard let clientError = error as? NIOSSLError, case NIOSSLError.handshakeFailed(_) = clientError  else {
+                    XCTFail("Unexpected error: \(error)")
+                    return
+                }
+            }
+        }
+    }
+    
 
     func testResponseDelayGet() throws {
         let httpBin = HTTPBin(ssl: false)
