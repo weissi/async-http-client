@@ -327,7 +327,6 @@ class HTTPClientTests: XCTestCase {
             XCTAssertNoThrow(try httpBin.shutdown())
         }
                 
-        // FIXME: Also check this with ok and no delay, and wait
         let request = try Request(url: "https://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "40"])
         let tasks = (1...100).map { _ -> HTTPClient.Task<TestHTTPDelegate.Response> in
             let task = httpClient.execute(request: request, delegate: TestHTTPDelegate())
@@ -1067,5 +1066,25 @@ class HTTPClientTests: XCTestCase {
             XCTAssertEqual(.ok, response?.status)
             XCTAssertNil(response?.body)
         }
+    }
+    
+    func testShutdownBeforeTasksCompletion() throws {
+        let httpBin = HTTPBin()
+        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        let client = HTTPClient(eventLoopGroupProvider: .shared(elg))
+        let req = try HTTPClient.Request(url: "http://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "500"])
+        let res = client.execute(request: req)
+        try client.syncShutdown(requiresCleanClose: false)
+        _ = try res.timeout(after: .seconds(2)).wait()
+        try httpBin.shutdown()
+    }
+    
+    func testUncleanShutdownActuallyShutsDown() throws {
+        let httpBin = HTTPBin()
+        let client = HTTPClient(eventLoopGroupProvider: .createNew)
+        let req = try HTTPClient.Request(url: "http://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "200"])
+        _ = client.execute(request: req)
+        try? client.syncShutdown(requiresCleanClose: true)
+        try httpBin.shutdown()
     }
 }

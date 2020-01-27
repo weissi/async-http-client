@@ -344,6 +344,7 @@ class ConnectionPool {
                 assert(!self.state.isClosed, "Calling syncClose on an already closed provider")
                 self.state.isClosed = true
                 if requiresCleanClose {
+                    // FIXME: Too early return?
                     guard self.state.leased == 0 else {
                         throw HTTPClientError.uncleanShutdown
                     }

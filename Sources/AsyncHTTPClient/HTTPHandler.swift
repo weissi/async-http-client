@@ -481,6 +481,7 @@ extension HTTPClient {
         public func cancel() {
             let channel: Channel? = self.lock.withLock {
                 if !cancelled {
+                    // FIXME: Will need synchronization when auto-cancelled
                     cancelled = true
                     return self.connection?.channel
                 } else {
@@ -689,6 +690,7 @@ extension TaskHandler: ChannelDuplexHandler {
             context.eventLoop.assertInEventLoop()
             self.state = .end
             self.failTaskAndNotifyDelegate(error: error, self.delegate.didReceiveError)
+            // FIXME: Redundant close?
             context.close(promise: nil)
             throw error
         }.cascade(to: promise)
