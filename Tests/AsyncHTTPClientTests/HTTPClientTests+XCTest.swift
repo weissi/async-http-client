@@ -76,7 +76,8 @@ extension HTTPClientTests {
             ("testStressGetClose", testStressGetClose),
             ("testRepeatedRequestsWorkWhenServerAlwaysCloses", testRepeatedRequestsWorkWhenServerAlwaysCloses),
             ("testShutdownBeforeTasksCompletion", testShutdownBeforeTasksCompletion),
-            ("testUncleanShutdownActuallyShutsDown", testUncleanShutdownActuallyShutsDown)
+            ("testUncleanShutdownActuallyShutsDown", testUncleanShutdownActuallyShutsDown),
+            ("testUncleanShutdownCancelsTasks", testUncleanShutdownCancelsTasks)
         ]
     }
 }

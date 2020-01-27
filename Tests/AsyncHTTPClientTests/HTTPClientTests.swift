@@ -1077,8 +1077,10 @@ class HTTPClientTests: XCTestCase {
         try client.syncShutdown(requiresCleanClose: false)
         _ = try res.timeout(after: .seconds(2)).wait()
         try httpBin.shutdown()
+        try elg.syncShutdownGracefully()
     }
     
+    /// This test would cause an assertion failure on `HTTPClient` deinit if client doesn't actually shutdown
     func testUncleanShutdownActuallyShutsDown() throws {
         let httpBin = HTTPBin()
         let client = HTTPClient(eventLoopGroupProvider: .createNew)
@@ -1086,5 +1088,38 @@ class HTTPClientTests: XCTestCase {
         _ = client.execute(request: req)
         try? client.syncShutdown(requiresCleanClose: true)
         try httpBin.shutdown()
+    }
+    
+    func testUncleanShutdownCancelsTasks() throws {
+        let httpBin = HTTPBin()
+        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        let client = HTTPClient(eventLoopGroupProvider: .shared(elg))
+        
+        defer {
+            XCTAssertNoThrow(try httpBin.shutdown())
+            XCTAssertNoThrow(try elg.syncShutdownGracefully())
+        }
+        
+        let responses = (0...100).map { _ in
+            client.get(url: "http://localhost:\(httpBin.port)/wait")
+        }
+        
+        try client.syncShutdown(requiresCleanClose: false)
+        
+        let results = try EventLoopFuture.whenAllComplete(responses, on: elg.next()).timeout(after: .seconds(4)).wait()
+        
+        for result in results {
+            switch result {
+            case .success:
+                XCTFail("Shouldn't succeed")
+            case .failure(let error):
+                if let clientError = error as? HTTPClientError, clientError == .cancelled {
+                    continue
+                } else {
+                    XCTFail("Unexpected error: \(error)")
+                }
+                
+            }
+        }
     }
 }
