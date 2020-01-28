@@ -104,8 +104,19 @@ class ConnectionPool {
 
     func syncClose(requiresCleanClose: Bool) throws {
         let connectionProviders = self.connectionProvidersLock.withLock { _connectionProviders.values }
+        var closeError: Error? = nil
         for connectionProvider in connectionProviders {
-            try connectionProvider.syncClose(requiresCleanClose: requiresCleanClose)
+            do {
+                try connectionProvider.syncClose(requiresCleanClose: requiresCleanClose)
+            } catch {
+                if closeError == nil {
+                    closeError = error
+                }
+            }
+        }
+        
+        if let closeError = closeError {
+            throw closeError
         }
     }
 
@@ -341,7 +352,8 @@ class ConnectionPool {
         }
 
         func syncClose(requiresCleanClose: Bool) throws {
-            let availableConnections = try self.stateLock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in
+            var closeError: Error? = nil
+            let availableConnections = self.stateLock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in
                 assert(!self.state.isClosed, "Calling syncClose on an already closed provider")
                 let waitersCopy = self.state.waiters
                 self.state.waiters.removeAll()
@@ -350,9 +362,8 @@ class ConnectionPool {
                 }
                 self.state.isClosed = true
                 if requiresCleanClose {
-                    // FIXME: Too early return?
-                    guard self.state.leased == 0 else {
-                        throw HTTPClientError.uncleanShutdown
+                    if self.state.leased != 0 {
+                        closeError = HTTPClientError.uncleanShutdown
                     }
                 }
                 return self.state.availableConnections
@@ -362,9 +373,20 @@ class ConnectionPool {
             } catch ChannelError.alreadyClosed {
                 return
             } catch {
-                throw error
+                // First catched errors have priority, this
+                // is to be consistent with what would happen
+                // if the `throw` wasn't delayed until everything
+                // is executed
+                if closeError == nil {
+                    closeError = error
+                }
             }
+            
             self.stateLock.withLock { self.state.availableConnections.removeAll() }
+            
+            if let closeError = closeError {
+                throw closeError
+            }
         }
 
         private func preconditionIsOpened() {

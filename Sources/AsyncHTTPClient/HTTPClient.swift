@@ -90,24 +90,41 @@ public class HTTPClient {
     /// this indicate shutdown was called too early before tasks were completed or explicitly canceled.
     /// In general, setting this parameter to `true` should make it easier and faster to catch related programming errors.
     public func syncShutdown(requiresCleanClose: Bool) throws {
-        try self.pool.syncClose(requiresCleanClose: requiresCleanClose)
-        // FIXME: This
+        var closeError: Error? = nil
         
+        do {
+            try self.pool.syncClose(requiresCleanClose: requiresCleanClose)
+        } catch {
+            closeError = error
+        }
+        
+        // FIXME: We probably need to wait on .cancel()
         self.tasksLock.withLock {
             for task in self.tasks.values {
                 task.cancel()
             }
         }
-        switch self.eventLoopGroupProvider {
-        case .shared:
-            self.isShutdown.store(true)
-            return
-        case .createNew:
-            if self.isShutdown.compareAndExchange(expected: false, desired: true) {
-                try self.eventLoopGroup.syncShutdownGracefully()
-            } else {
-                throw HTTPClientError.alreadyShutdown
+        
+        do {
+            switch self.eventLoopGroupProvider {
+            case .shared:
+                self.isShutdown.store(true)
+                return
+            case .createNew:
+                if self.isShutdown.compareAndExchange(expected: false, desired: true) {
+                    try self.eventLoopGroup.syncShutdownGracefully()
+                } else {
+                    throw HTTPClientError.alreadyShutdown
+                }
             }
+        } catch {
+            if closeError == nil {
+                closeError = error
+            }
+        }
+        
+        if let closeError = closeError {
+            throw closeError
         }
     }
 
