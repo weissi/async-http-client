@@ -266,6 +266,7 @@ class ConnectionPool {
         }
 
         func release(connection: Connection) {
+            //FIXME: See if we don't reach this
             self.preconditionIsOpened()
             let action = self.parentPool.connectionProvidersLock.withLock {
                 self.stateLock.withLock { self.state.releaseAction(for: connection) }
@@ -342,6 +343,11 @@ class ConnectionPool {
         func syncClose(requiresCleanClose: Bool) throws {
             let availableConnections = try self.stateLock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in
                 assert(!self.state.isClosed, "Calling syncClose on an already closed provider")
+                let waitersCopy = self.state.waiters
+                self.state.waiters.removeAll()
+                for waiter in waitersCopy {
+                    waiter.promise.fail(HTTPClientError.cancelled)
+                }
                 self.state.isClosed = true
                 if requiresCleanClose {
                     // FIXME: Too early return?
@@ -384,7 +390,7 @@ class ConnectionPool {
             /// `maximumConcurrentConnections` get a `Future<Connection>`
             /// whose associated promise is stored in `Waiter`. The promise is completed
             /// as soon as possible by the provider, in FIFO order.
-            private var waiters: CircularBuffer<Waiter> = .init(initialCapacity: 8)
+            fileprivate var waiters: CircularBuffer<Waiter> = .init(initialCapacity: 8)
 
             fileprivate var isClosed: Bool = false
 
@@ -527,7 +533,7 @@ class ConnectionPool {
             ///
             /// `Waiter`s are created when `maximumConcurrentConnections` is reached
             /// and we cannot create new connections anymore.
-            private struct Waiter {
+            fileprivate struct Waiter {
                 /// The promise to complete once a connection is available
                 let promise: EventLoopPromise<Connection>
 

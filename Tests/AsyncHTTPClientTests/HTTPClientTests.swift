@@ -1100,13 +1100,13 @@ class HTTPClientTests: XCTestCase {
             XCTAssertNoThrow(try elg.syncShutdownGracefully())
         }
         
-        let responses = (0...100).map { _ in
+        let responses = (1...100).map { _ in
             client.get(url: "http://localhost:\(httpBin.port)/wait")
         }
         
         try client.syncShutdown(requiresCleanClose: false)
         
-        let results = try EventLoopFuture.whenAllComplete(responses, on: elg.next()).timeout(after: .seconds(4)).wait()
+        let results = try EventLoopFuture.whenAllComplete(responses, on: elg.next()).timeout(after: .seconds(100)).wait()
         
         for result in results {
             switch result {

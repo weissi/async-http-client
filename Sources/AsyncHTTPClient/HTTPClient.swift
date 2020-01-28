@@ -50,6 +50,8 @@ public class HTTPClient {
     let configuration: Configuration
     let pool: ConnectionPool
     let isShutdown = NIOAtomic.makeAtomic(value: false)
+    fileprivate var tasks = [UUID:TaskProtocol]()
+    fileprivate let tasksLock = Lock()
 
     /// Create an `HTTPClient` with specified `EventLoopGroup` provider and configuration.
     ///
@@ -89,6 +91,13 @@ public class HTTPClient {
     /// In general, setting this parameter to `true` should make it easier and faster to catch related programming errors.
     public func syncShutdown(requiresCleanClose: Bool) throws {
         try self.pool.syncClose(requiresCleanClose: requiresCleanClose)
+        // FIXME: This
+        
+        self.tasksLock.withLock {
+            for task in self.tasks.values {
+                task.cancel()
+            }
+        }
         switch self.eventLoopGroupProvider {
         case .shared:
             self.isShutdown.store(true)
@@ -251,11 +260,30 @@ public class HTTPClient {
         }
 
         let task = Task<Delegate.Response>(eventLoop: taskEL)
+        self.tasksLock.withLock {
+            self.tasks[task.id] = task
+        }
         let promise = task.promise
+        
+        promise.futureResult.whenComplete { _ in
+            self.tasksLock.withLock {
+                self.tasks[task.id] = nil
+            }
+        }
 
         let connection = self.pool.getConnection(for: request, preference: eventLoopPreference, on: taskEL, deadline: deadline)
 
+        connection.whenComplete { result in
+            switch result {
+            case .success(let value):
+                print("Success with \(value)")
+            case .failure(let error):
+                print("Error with \(error)")
+            }
+        }
+        
         connection.flatMap { connection -> EventLoopFuture<Void> in
+            print("Got value")
             let channel = connection.channel
             let addedFuture: EventLoopFuture<Void>
 
@@ -274,13 +302,20 @@ public class HTTPClient {
                     return channel.eventLoop.makeSucceededFuture(())
                 }
             }.flatMap {
+                print("Reached add")
                 let taskHandler = TaskHandler(task: task, delegate: delegate, redirectHandler: redirectHandler, ignoreUncleanSSLShutdown: self.configuration.ignoreUncleanSSLShutdown)
-                task.setConnection(connection)
+                do {
+                    try task.setConnection(connection)
+                } catch {
+                    return addedFuture.eventLoop.makeFailedFuture(error)
+                }
+                
                 return channel.pipeline.addHandler(taskHandler, name: "taskHandler")
             }.flatMap {
                 channel.writeAndFlush(request)
             }
         }.cascadeFailure(to: promise)
+        task.futureResult.whenComplete { print($0) }
         return task
     }
 

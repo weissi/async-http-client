@@ -448,7 +448,7 @@ extension URL {
 extension HTTPClient {
     /// Response execution context. Will be created by the library and could be used for obtaining
     /// `EventLoopFuture<Response>` of the execution or cancellation of the execution.
-    public final class Task<Response> {
+    public final class Task<Response>: TaskProtocol {
         /// The `EventLoop` the delegate will be executed on.
         public let eventLoop: EventLoop
 
@@ -456,6 +456,7 @@ extension HTTPClient {
         var connection: ConnectionPool.Connection?
         private var cancelled: Bool
         let lock: Lock
+        let id = UUID()
 
         init(eventLoop: EventLoop) {
             self.eventLoop = eventLoop
@@ -493,11 +494,12 @@ extension HTTPClient {
         }
 
         @discardableResult
-        func setConnection(_ connection: ConnectionPool.Connection) -> ConnectionPool.Connection {
-            return self.lock.withLock {
+        func setConnection(_ connection: ConnectionPool.Connection) throws -> ConnectionPool.Connection {
+            return try self.lock.withLock {
                 self.connection = connection
                 if self.cancelled {
                     connection.channel.triggerUserOutboundEvent(TaskCancelEvent(), promise: nil)
+                    throw HTTPClientError.cancelled
                 }
                 return connection
             }
@@ -541,6 +543,11 @@ extension HTTPClient {
 }
 
 internal struct TaskCancelEvent {}
+
+internal protocol TaskProtocol {
+    func cancel()
+    var id: UUID { get }
+}
 
 // MARK: - TaskHandler
 
