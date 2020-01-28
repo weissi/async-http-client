@@ -1075,7 +1075,7 @@ class HTTPClientTests: XCTestCase {
         let req = try HTTPClient.Request(url: "http://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "500"])
         let res = client.execute(request: req)
         try client.syncShutdown(requiresCleanClose: false)
-        _ = try res.timeout(after: .seconds(2)).wait()
+        _ = try? res.timeout(after: .seconds(2)).wait()
         try httpBin.shutdown()
         try elg.syncShutdownGracefully()
     }
