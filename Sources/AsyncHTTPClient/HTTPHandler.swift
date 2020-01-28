@@ -454,6 +454,7 @@ extension HTTPClient {
 
         let promise: EventLoopPromise<Response>
         var connection: ConnectionPool.Connection?
+        // FIXME: Check thread safety
         private var cancelled: Bool
         let lock: Lock
         let id = UUID()
