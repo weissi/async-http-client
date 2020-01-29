@@ -289,18 +289,8 @@ public class HTTPClient {
         }
 
         let connection = self.pool.getConnection(for: request, preference: eventLoopPreference, on: taskEL, deadline: deadline)
-
-        connection.whenComplete { result in
-            switch result {
-            case .success(let value):
-                print("Success with \(value)")
-            case .failure(let error):
-                print("Error with \(error)")
-            }
-        }
         
         connection.flatMap { connection -> EventLoopFuture<Void> in
-            print("Got value")
             let channel = connection.channel
             let addedFuture: EventLoopFuture<Void>
 
@@ -319,7 +309,6 @@ public class HTTPClient {
                     return channel.eventLoop.makeSucceededFuture(())
                 }
             }.flatMap {
-                print("Reached add")
                 let taskHandler = TaskHandler(task: task, delegate: delegate, redirectHandler: redirectHandler, ignoreUncleanSSLShutdown: self.configuration.ignoreUncleanSSLShutdown)
                 do {
                     try task.setConnection(connection)
@@ -332,7 +321,6 @@ public class HTTPClient {
                 channel.writeAndFlush(request)
             }
         }.cascadeFailure(to: promise)
-        task.futureResult.whenComplete { print($0) }
         return task
     }
 
