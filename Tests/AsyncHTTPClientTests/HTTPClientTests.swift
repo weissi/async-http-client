@@ -327,7 +327,7 @@ class HTTPClientTests: XCTestCase {
             XCTAssertNoThrow(try httpBin.shutdown())
         }
                 
-        let request = try Request(url: "https://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "40"])
+        let request = try Request(url: "http://localhost:\(httpBin.port)/wait", method: .GET)
         let tasks = (1...100).map { _ -> HTTPClient.Task<TestHTTPDelegate.Response> in
             let task = httpClient.execute(request: request, delegate: TestHTTPDelegate())
             task.cancel()

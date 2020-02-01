@@ -310,15 +310,19 @@ public class HTTPClient {
                 }
             }.flatMap {
                 let taskHandler = TaskHandler(task: task, delegate: delegate, redirectHandler: redirectHandler, ignoreUncleanSSLShutdown: self.configuration.ignoreUncleanSSLShutdown)
-                do {
-                    try task.setConnection(connection)
-                } catch {
-                    return addedFuture.eventLoop.makeFailedFuture(error)
-                }
-                
                 return channel.pipeline.addHandler(taskHandler, name: "taskHandler")
             }.flatMap {
-                channel.writeAndFlush(request)
+                task.setConnection(connection)
+                
+                let isCancelled = task.lock.withLock {
+                    task.cancelled
+                }
+                
+                if !isCancelled {
+                    return channel.writeAndFlush(request)
+                } else {
+                    return channel.eventLoop.makeSucceededFuture(())
+                }
             }
         }.cascadeFailure(to: promise)
         return task

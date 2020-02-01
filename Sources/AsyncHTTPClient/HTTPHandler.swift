@@ -455,7 +455,7 @@ extension HTTPClient {
         let promise: EventLoopPromise<Response>
         var connection: ConnectionPool.Connection?
         // FIXME: Check thread safety
-        private var cancelled: Bool
+        var cancelled: Bool
         let lock: Lock
         let id = UUID()
 
@@ -495,12 +495,11 @@ extension HTTPClient {
         }
 
         @discardableResult
-        func setConnection(_ connection: ConnectionPool.Connection) throws -> ConnectionPool.Connection {
-            return try self.lock.withLock {
+        func setConnection(_ connection: ConnectionPool.Connection) -> ConnectionPool.Connection {
+            return self.lock.withLock {
                 self.connection = connection
                 if self.cancelled {
                     connection.channel.triggerUserOutboundEvent(TaskCancelEvent(), promise: nil)
-                    throw HTTPClientError.cancelled
                 }
                 return connection
             }
@@ -514,7 +513,7 @@ extension HTTPClient {
 
         func fail<Delegate: HTTPClientResponseDelegate>(with error: Error, delegateType: Delegate.Type) {
             if let connection = self.connection {
-                connection.channel.close().whenComplete { _ in
+                connection.channel.close().whenComplete { result in
                     self.releaseAssociatedConnection(delegateType: delegateType).whenComplete { _ in
                         self.promise.fail(error)
                     }
