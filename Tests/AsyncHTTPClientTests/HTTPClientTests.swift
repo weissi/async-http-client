@@ -317,30 +317,30 @@ class HTTPClientTests: XCTestCase {
             }
         }
     }
-    
+
     func testStressCancel() throws {
         let httpBin = HTTPBin()
         let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
-        
+
         defer {
             XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
             XCTAssertNoThrow(try httpBin.shutdown())
         }
-                
+
         let request = try Request(url: "http://localhost:\(httpBin.port)/wait", method: .GET)
         let tasks = (1...100).map { _ -> HTTPClient.Task<TestHTTPDelegate.Response> in
             let task = httpClient.execute(request: request, delegate: TestHTTPDelegate())
             task.cancel()
             return task
         }
-        
+
         for task in tasks {
             switch (Result { try task.futureResult.timeout(after: .seconds(10)).wait() }) {
-            case .success(_):
+            case .success:
                 XCTFail("Shouldn't succeed")
                 return
             case .failure(let error):
-                guard let clientError = error as? HTTPClientError, clientError == .cancelled  else {
+                guard let clientError = error as? HTTPClientError, clientError == .cancelled else {
                     XCTFail("Unexpected error: \(error)")
                     return
                 }
@@ -953,37 +953,73 @@ class HTTPClientTests: XCTestCase {
         }
         XCTAssertNoThrow(try EventLoopFuture<HTTPClient.Response>.andAllSucceed(futureResults, on: eventLoop).wait())
     }
-    
+
     func testStressGetHttpsSSLError() throws {
         let httpBin = HTTPBin()
         let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
-        
+
         defer {
             XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
             XCTAssertNoThrow(try httpBin.shutdown())
         }
-                
-        let request = try Request(url: "https://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "40"])
+
+        let request = try Request(url: "https://localhost:\(httpBin.port)/wait", method: .GET)
         let tasks = (1...100).map { _ -> HTTPClient.Task<TestHTTPDelegate.Response> in
-            let task = httpClient.execute(request: request, delegate: TestHTTPDelegate())
-            task.cancel()
-            return task
+            httpClient.execute(request: request, delegate: TestHTTPDelegate())
         }
-        
-        for task in tasks {
-            switch (Result { try task.futureResult.timeout(after: .seconds(10)).wait() }) {
-            case .success(_):
+
+        let results = try EventLoopFuture<TestHTTPDelegate.Response>.whenAllComplete(tasks.map { $0.futureResult }, on: httpClient.eventLoopGroup.next()).wait()
+
+        for result in results {
+            switch result {
+            case .success:
                 XCTFail("Shouldn't succeed")
-                return
+                continue
             case .failure(let error):
-                guard let clientError = error as? NIOSSLError, case NIOSSLError.handshakeFailed(_) = clientError  else {
+                guard let clientError = error as? NIOSSLError, case NIOSSLError.handshakeFailed = clientError else {
                     XCTFail("Unexpected error: \(error)")
-                    return
+                    continue
                 }
             }
         }
     }
-    
+
+    func testUncleanCloseThrows() {
+        let httpBin = HTTPBin()
+        defer {
+            XCTAssertNoThrow(try httpBin.shutdown())
+        }
+
+        let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
+        _ = httpClient.get(url: "http://localhost:\(httpBin.port)/wait")
+        do {
+            try httpClient.syncShutdown(requiresCleanClose: true)
+            XCTFail("There should be an error on shutdown")
+        } catch {
+            guard let clientError = error as? HTTPClientError, clientError == .uncleanShutdown else {
+                XCTFail("Unexpected shutdown error: \(error)")
+                return
+            }
+        }
+    }
+
+    func testFailingConnectionIsReleased() {
+        let httpBin = HTTPBin(refusesConnections: true)
+        let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
+        defer {
+            XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
+            XCTAssertNoThrow(try httpBin.shutdown())
+        }
+        do {
+            _ = try httpClient.get(url: "http://localhost:\(httpBin.port)/get").timeout(after: .seconds(5)).wait()
+            XCTFail("Shouldn't succeed")
+        } catch {
+            guard !(error is EventLoopFutureTimeoutError) else {
+                XCTFail("Timed out but should have failed immediately")
+                return
+            }
+        }
+    }
 
     func testResponseDelayGet() throws {
         let httpBin = HTTPBin(ssl: false)
@@ -1067,7 +1103,7 @@ class HTTPClientTests: XCTestCase {
             XCTAssertNil(response?.body)
         }
     }
-    
+
     func testShutdownBeforeTasksCompletion() throws {
         let httpBin = HTTPBin()
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
@@ -1079,7 +1115,7 @@ class HTTPClientTests: XCTestCase {
         try httpBin.shutdown()
         try elg.syncShutdownGracefully()
     }
-    
+
     /// This test would cause an assertion failure on `HTTPClient` deinit if client doesn't actually shutdown
     func testUncleanShutdownActuallyShutsDown() throws {
         let httpBin = HTTPBin()
@@ -1089,25 +1125,25 @@ class HTTPClientTests: XCTestCase {
         try? client.syncShutdown(requiresCleanClose: true)
         try httpBin.shutdown()
     }
-    
+
     func testUncleanShutdownCancelsTasks() throws {
         let httpBin = HTTPBin()
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let client = HTTPClient(eventLoopGroupProvider: .shared(elg))
-        
+
         defer {
             XCTAssertNoThrow(try httpBin.shutdown())
             XCTAssertNoThrow(try elg.syncShutdownGracefully())
         }
-        
+
         let responses = (1...100).map { _ in
             client.get(url: "http://localhost:\(httpBin.port)/wait")
         }
-        
+
         try client.syncShutdown(requiresCleanClose: false)
-        
+
         let results = try EventLoopFuture.whenAllComplete(responses, on: elg.next()).timeout(after: .seconds(100)).wait()
-        
+
         for result in results {
             switch result {
             case .success:
@@ -1118,7 +1154,6 @@ class HTTPClientTests: XCTestCase {
                 } else {
                     XCTFail("Unexpected error: \(error)")
                 }
-                
             }
         }
     }

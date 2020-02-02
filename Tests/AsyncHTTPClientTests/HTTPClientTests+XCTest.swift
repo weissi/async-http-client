@@ -71,13 +71,15 @@ extension HTTPClientTests {
             ("testSubsequentRequestsWorkWithServerAlternatingBetweenKeepAliveAndClose", testSubsequentRequestsWorkWithServerAlternatingBetweenKeepAliveAndClose),
             ("testStressGetHttps", testStressGetHttps),
             ("testStressGetHttpsSSLError", testStressGetHttpsSSLError),
+            ("testUncleanCloseThrows", testUncleanCloseThrows),
+            ("testFailingConnectionIsReleased", testFailingConnectionIsReleased),
             ("testResponseDelayGet", testResponseDelayGet),
             ("testIdleTimeoutNoReuse", testIdleTimeoutNoReuse),
             ("testStressGetClose", testStressGetClose),
             ("testRepeatedRequestsWorkWhenServerAlwaysCloses", testRepeatedRequestsWorkWhenServerAlwaysCloses),
             ("testShutdownBeforeTasksCompletion", testShutdownBeforeTasksCompletion),
             ("testUncleanShutdownActuallyShutsDown", testUncleanShutdownActuallyShutsDown),
-            ("testUncleanShutdownCancelsTasks", testUncleanShutdownCancelsTasks)
+            ("testUncleanShutdownCancelsTasks", testUncleanShutdownCancelsTasks),
         ]
     }
 }

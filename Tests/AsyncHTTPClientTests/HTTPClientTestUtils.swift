@@ -112,12 +112,15 @@ internal final class HTTPBin {
         return channel.pipeline.addHandler(try! NIOSSLServerHandler(context: context), position: .first)
     }
 
-    init(ssl: Bool = false, compress: Bool = false, simulateProxy: HTTPProxySimulator.Option? = nil, channelPromise: EventLoopPromise<Channel>? = nil, connectionDelay: TimeAmount = .nanoseconds(0), maxChannelAge: TimeAmount? = nil) {
+    init(ssl: Bool = false, compress: Bool = false, simulateProxy: HTTPProxySimulator.Option? = nil, channelPromise: EventLoopPromise<Channel>? = nil, connectionDelay: TimeAmount = .nanoseconds(0), maxChannelAge: TimeAmount? = nil, refusesConnections: Bool = false) {
         self.serverChannel = try! ServerBootstrap(group: self.group)
             .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
             .childChannelOption(ChannelOptions.socket(IPPROTO_TCP, TCP_NODELAY), value: 1)
             .childChannelInitializer { channel in
-                channel.eventLoop.scheduleTask(in: connectionDelay) {}.futureResult.flatMap {
+                guard !refusesConnections else {
+                    return channel.eventLoop.makeFailedFuture(HTTPBinError.refusedConnection)
+                }
+                return channel.eventLoop.scheduleTask(in: connectionDelay) {}.futureResult.flatMap {
                     channel.pipeline.configureHTTPServerPipeline(withPipeliningAssistance: true, withErrorHandling: true).flatMap {
                         if compress {
                             return channel.pipeline.addHandler(HTTPResponseCompressor())
@@ -155,6 +158,10 @@ internal final class HTTPBin {
     deinit {
         assert(self.isShutdown.load(), "HTTPBin not shutdown before deinit")
     }
+}
+
+enum HTTPBinError: Error {
+    case refusedConnection
 }
 
 final class HTTPProxySimulator: ChannelInboundHandler, RemovableChannelHandler {

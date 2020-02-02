@@ -18,6 +18,7 @@ import NIOConcurrencyHelpers
 import NIOHTTP1
 import NIOHTTPCompression
 import NIOSSL
+import NIOTLS
 
 /// HTTPClient class provides API for request execution.
 ///
@@ -50,8 +51,8 @@ public class HTTPClient {
     let configuration: Configuration
     let pool: ConnectionPool
     let isShutdown = NIOAtomic.makeAtomic(value: false)
-    fileprivate var tasks = [UUID:TaskProtocol]()
-    fileprivate let tasksLock = Lock()
+    private var tasks = [UUID: TaskProtocol]()
+    private let tasksLock = Lock()
 
     /// Create an `HTTPClient` with specified `EventLoopGroup` provider and configuration.
     ///
@@ -90,21 +91,27 @@ public class HTTPClient {
     /// this indicate shutdown was called too early before tasks were completed or explicitly canceled.
     /// In general, setting this parameter to `true` should make it easier and faster to catch related programming errors.
     public func syncShutdown(requiresCleanClose: Bool) throws {
-        var closeError: Error? = nil
-        
+        var closeError: Error?
+
+        let tasks = self.tasksLock.withLock {
+            self.tasks.values
+        }
+        if !tasks.isEmpty {
+            // FIXME: May tasks contain already cancelled tasks?
+            closeError = HTTPClientError.uncleanShutdown
+        }
+        for task in tasks {
+            task.cancel()
+        }
+
+        try? EventLoopFuture.andAllComplete((tasks.map { $0.completion }), on: self.eventLoopGroup.next()).wait()
+
         do {
             try self.pool.syncClose(requiresCleanClose: requiresCleanClose)
         } catch {
             closeError = error
         }
-        
-        // FIXME: We probably need to wait on .cancel()
-        self.tasksLock.withLock {
-            for task in self.tasks.values {
-                task.cancel()
-            }
-        }
-        
+
         do {
             switch self.eventLoopGroupProvider {
             case .shared:
@@ -122,7 +129,7 @@ public class HTTPClient {
                 closeError = error
             }
         }
-        
+
         if let closeError = closeError {
             throw closeError
         }
@@ -281,7 +288,7 @@ public class HTTPClient {
             self.tasks[task.id] = task
         }
         let promise = task.promise
-        
+
         promise.futureResult.whenComplete { _ in
             self.tasksLock.withLock {
                 self.tasks[task.id] = nil
@@ -289,7 +296,7 @@ public class HTTPClient {
         }
 
         let connection = self.pool.getConnection(for: request, preference: eventLoopPreference, on: taskEL, deadline: deadline)
-        
+
         connection.flatMap { connection -> EventLoopFuture<Void> in
             let channel = connection.channel
             let addedFuture: EventLoopFuture<Void>
@@ -313,18 +320,20 @@ public class HTTPClient {
                 return channel.pipeline.addHandler(taskHandler, name: "taskHandler")
             }.flatMap {
                 task.setConnection(connection)
-                
+
                 let isCancelled = task.lock.withLock {
                     task.cancelled
                 }
-                
+
                 if !isCancelled {
                     return channel.writeAndFlush(request)
                 } else {
                     return channel.eventLoop.makeSucceededFuture(())
                 }
             }
-        }.cascadeFailure(to: promise)
+        }.whenFailure {
+            promise.fail($0)
+        }
         return task
     }
 
@@ -526,18 +535,67 @@ extension ChannelPipeline {
         return addHandlers([encoder, decoder, handler])
     }
 
-    func addSSLHandlerIfNeeded(for key: ConnectionPool.Key, tlsConfiguration: TLSConfiguration?) -> EventLoopFuture<Void> {
+    func addSSLHandlerIfNeeded(for key: ConnectionPool.Key, tlsConfiguration: TLSConfiguration?, handshakePromise: EventLoopPromise<Void>) -> EventLoopFuture<Void> {
         guard key.scheme == .https else {
+            handshakePromise.succeed(())
             return self.eventLoop.makeSucceededFuture(())
         }
 
         do {
             let tlsConfiguration = tlsConfiguration ?? TLSConfiguration.forClient()
             let context = try NIOSSLContext(configuration: tlsConfiguration)
-            return self.addHandler(try NIOSSLClientHandler(context: context, serverHostname: key.host.isIPAddress ? nil : key.host))
+            let handlers: [ChannelHandler] = [
+                try NIOSSLClientHandler(context: context, serverHostname: key.host.isIPAddress ? nil : key.host),
+                TLSEventsHandler(completionPromise: handshakePromise),
+            ]
+
+            return self.addHandlers(handlers)
         } catch {
             return self.eventLoop.makeFailedFuture(error)
         }
+    }
+}
+
+class TLSEventsHandler: ChannelInboundHandler, RemovableChannelHandler {
+    typealias InboundIn = NIOAny
+
+    var completionPromise: EventLoopPromise<Void>?
+
+    init(completionPromise: EventLoopPromise<Void>) {
+        self.completionPromise = completionPromise
+    }
+
+    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        if let tlsEvent = event as? TLSUserEvent {
+            switch tlsEvent {
+            case .handshakeCompleted:
+                self.completionPromise?.succeed(())
+                self.completionPromise = nil
+                context.pipeline.removeHandler(self, promise: nil)
+            case .shutdownCompleted:
+                break
+            }
+        }
+        context.fireUserInboundEventTriggered(event)
+    }
+
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        if let sslError = error as? NIOSSLError {
+            switch sslError {
+            case .handshakeFailed:
+                self.completionPromise?.fail(error)
+                self.completionPromise = nil
+                context.pipeline.removeHandler(self, promise: nil)
+            default:
+                break
+            }
+        }
+        context.fireErrorCaught(error)
+    }
+
+    func handlerRemoved(context: ChannelHandlerContext) {
+        struct NoResult: Error {}
+        self.completionPromise?.fail(NoResult())
     }
 }
 

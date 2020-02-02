@@ -453,6 +453,7 @@ extension HTTPClient {
         public let eventLoop: EventLoop
 
         let promise: EventLoopPromise<Response>
+        var completion: EventLoopFuture<Void>
         var connection: ConnectionPool.Connection?
         // FIXME: Check thread safety
         var cancelled: Bool
@@ -462,6 +463,7 @@ extension HTTPClient {
         init(eventLoop: EventLoop) {
             self.eventLoop = eventLoop
             self.promise = eventLoop.makePromise()
+            self.completion = self.promise.futureResult.map { _ in }
             self.cancelled = false
             self.lock = Lock()
         }
@@ -513,7 +515,7 @@ extension HTTPClient {
 
         func fail<Delegate: HTTPClientResponseDelegate>(with error: Error, delegateType: Delegate.Type) {
             if let connection = self.connection {
-                connection.channel.close().whenComplete { result in
+                connection.channel.close().whenComplete { _ in
                     self.releaseAssociatedConnection(delegateType: delegateType).whenComplete { _ in
                         self.promise.fail(error)
                     }
@@ -534,8 +536,7 @@ extension HTTPClient {
                 }
 
             } else {
-                // TODO: We could add an assertion to check that we never reach this
-                // which should never happen outside of internal unit tests
+                // FIXME: Check what should happen when we reach this
                 return self.eventLoop.makeSucceededFuture(())
             }
         }
@@ -547,6 +548,7 @@ internal struct TaskCancelEvent {}
 internal protocol TaskProtocol {
     func cancel()
     var id: UUID { get }
+    var completion: EventLoopFuture<Void> { get }
 }
 
 // MARK: - TaskHandler

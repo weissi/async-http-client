@@ -104,7 +104,7 @@ class ConnectionPool {
 
     func syncClose(requiresCleanClose: Bool) throws {
         let connectionProviders = self.connectionProvidersLock.withLock { _connectionProviders.values }
-        var closeError: Error? = nil
+        var closeError: Error?
         for connectionProvider in connectionProviders {
             do {
                 try connectionProvider.syncClose(requiresCleanClose: requiresCleanClose)
@@ -114,7 +114,7 @@ class ConnectionPool {
                 }
             }
         }
-        
+
         if let closeError = closeError {
             throw closeError
         }
@@ -277,7 +277,7 @@ class ConnectionPool {
         }
 
         func release(connection: Connection) {
-            //FIXME: See if we don't reach this
+            // FIXME: See if we don't reach this
             self.preconditionIsOpened()
             let action = self.parentPool.connectionProvidersLock.withLock {
                 self.stateLock.withLock { self.state.releaseAction(for: connection) }
@@ -313,18 +313,34 @@ class ConnectionPool {
 
         private func makeConnection(on eventLoop: EventLoop) -> EventLoopFuture<Connection> {
             self.preconditionIsOpened()
-            let bootstrap = ClientBootstrap.makeHTTPClientBootstrapBase(group: eventLoop, host: self.key.host, port: self.key.port, configuration: self.configuration) { channel in
-                channel.pipeline.addSSLHandlerIfNeeded(for: self.key, tlsConfiguration: self.configuration.tlsConfiguration).flatMap {
+            let handshakePromise = eventLoop.makePromise(of: Void.self)
+            let bootstrap = ClientBootstrap.makeHTTPClientBootstrapBase(group: eventLoop, host: self.key.host, port: self.key.port, configuration: self.configuration)
+            let address = HTTPClient.resolveAddress(host: self.key.host, port: self.key.port, proxy: self.configuration.proxy)
+
+            let connection = bootstrap.connect(host: address.host, port: address.port).flatMap { channel -> EventLoopFuture<ConnectionPool.Connection> in
+                channel.pipeline.addSSLHandlerIfNeeded(for: self.key, tlsConfiguration: self.configuration.tlsConfiguration, handshakePromise: handshakePromise).flatMap {
                     channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes)
+                }.map {
+                    let connection = Connection(key: self.key, channel: channel, parentPool: self.parentPool)
+                    self.configureCloseCallback(of: connection)
+                    connection.isLeased = true
+                    return connection
+                }
+            }.and(handshakePromise.futureResult).map { $0.0 }
+
+            connection.whenFailure { _ in
+                let action = self.stateLock.withLock {
+                    self.state.failedConnectionAction()
+                }
+                switch action {
+                case .makeConnectionAndComplete(let el, let promise):
+                    self.makeConnection(on: el).cascade(to: promise)
+                case .none:
+                    break
                 }
             }
-            let address = HTTPClient.resolveAddress(host: self.key.host, port: self.key.port, proxy: self.configuration.proxy)
-            return bootstrap.connect(host: address.host, port: address.port).map { channel in
-                let connection = Connection(key: self.key, channel: channel, parentPool: self.parentPool)
-                self.configureCloseCallback(of: connection)
-                connection.isLeased = true
-                return connection
-            }
+
+            return connection
         }
 
         /// Adds a callback on connection close that asks the `state` what to do about this
@@ -352,7 +368,7 @@ class ConnectionPool {
         }
 
         func syncClose(requiresCleanClose: Bool) throws {
-            var closeError: Error? = nil
+            var closeError: Error?
             let availableConnections = self.stateLock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in
                 assert(!self.state.isClosed, "Calling syncClose on an already closed provider")
                 let waitersCopy = self.state.waiters
@@ -362,6 +378,7 @@ class ConnectionPool {
                 }
                 self.state.isClosed = true
                 if requiresCleanClose {
+                    // TODO: This should probably become an assertion
                     if self.state.leased != 0 {
                         closeError = HTTPClientError.uncleanShutdown
                     }
@@ -381,9 +398,9 @@ class ConnectionPool {
                     closeError = error
                 }
             }
-            
+
             self.stateLock.withLock { self.state.availableConnections.removeAll() }
-            
+
             if let closeError = closeError {
                 throw closeError
             }
@@ -503,6 +520,21 @@ class ConnectionPool {
                 }
 
                 return .none
+            }
+
+            fileprivate mutating func failedConnectionAction() -> ClosedConnectionRemoveAction {
+                if let firstWaiter = self.waiters.popFirst() {
+                    let (el, _) = self.resolvePreference(firstWaiter.preference)
+                    // FIXME: See why that's right
+                    self.leased += 1
+                    return .makeConnectionAndComplete(el, firstWaiter.promise)
+                } else {
+                    self.leased -= 1
+                    if self.providerMustClose() {
+                        self.removeFromPool()
+                    }
+                    return .none
+                }
             }
 
             fileprivate mutating func popConnectionPromiseToFail() -> EventLoopPromise<Connection>? {
