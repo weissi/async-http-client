@@ -132,6 +132,9 @@ class ConnectionPool {
                 self.scheme = .http
             case "https":
                 self.scheme = .https
+            case "unix":
+                self.scheme = .unix
+                self.unixPath = request.url.path
             default:
                 fatalError("HTTPClient.Request scheme should already be a valid one")
             }
@@ -142,10 +145,12 @@ class ConnectionPool {
         var scheme: Scheme
         var host: String
         var port: Int
+        var unixPath: String = ""
 
         enum Scheme: Hashable {
             case http
             case https
+            case unix
         }
     }
 
@@ -317,7 +322,15 @@ class ConnectionPool {
             let bootstrap = ClientBootstrap.makeHTTPClientBootstrapBase(group: eventLoop, host: self.key.host, port: self.key.port, configuration: self.configuration)
             let address = HTTPClient.resolveAddress(host: self.key.host, port: self.key.port, proxy: self.configuration.proxy)
 
-            let connection = bootstrap.connect(host: address.host, port: address.port).flatMap { channel -> EventLoopFuture<ConnectionPool.Connection> in
+            let channel: EventLoopFuture<Channel>
+            switch self.key.scheme {
+            case .http, .https:
+                channel = bootstrap.connect(host: address.host, port: address.port)
+            case .unix:
+                channel = bootstrap.connect(unixDomainSocketPath: self.key.unixPath)
+            }
+
+            let connection = channel.flatMap { channel -> EventLoopFuture<ConnectionPool.Connection> in
                 channel.pipeline.addSSLHandlerIfNeeded(for: self.key, tlsConfiguration: self.configuration.tlsConfiguration, handshakePromise: handshakePromise).flatMap {
                     channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes)
                 }.map {
