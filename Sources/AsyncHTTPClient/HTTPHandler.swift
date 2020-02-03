@@ -727,8 +727,6 @@ extension TaskHandler: ChannelDuplexHandler {
             context.eventLoop.assertInEventLoop()
             self.state = .end
             self.failTaskAndNotifyDelegate(error: error, self.delegate.didReceiveError)
-            // FIXME: Redundant close?
-            context.close(promise: nil)
             throw error
         }.cascade(to: promise)
     }
