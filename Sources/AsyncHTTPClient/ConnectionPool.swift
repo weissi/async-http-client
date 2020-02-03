@@ -262,10 +262,8 @@ class ConnectionPool {
         }
 
         deinit {
-            self.stateLock.withLock {
-                assert(self.state.availableConnections.isEmpty, "Available connections should be empty before deinit")
-                assert(self.state.leased == 0, "All leased connections should have been returned before deinit")
-            }
+            assert(self.state.availableConnections.isEmpty, "Available connections should be empty before deinit")
+            assert(self.state.leased == 0, "All leased connections should have been returned before deinit")
         }
 
         func getConnection(preference: HTTPClient.EventLoopPreference) -> EventLoopFuture<Connection> {
