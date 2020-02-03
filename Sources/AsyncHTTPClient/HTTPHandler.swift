@@ -486,7 +486,6 @@ extension HTTPClient {
         let promise: EventLoopPromise<Response>
         var completion: EventLoopFuture<Void>
         var connection: ConnectionPool.Connection?
-        // FIXME: Check thread safety
         var cancelled: Bool
         let lock: Lock
         let id = UUID()
@@ -516,7 +515,6 @@ extension HTTPClient {
         public func cancel() {
             let channel: Channel? = self.lock.withLock {
                 if !cancelled {
-                    // FIXME: Will need synchronization when auto-cancelled
                     cancelled = true
                     return self.connection?.channel
                 } else {

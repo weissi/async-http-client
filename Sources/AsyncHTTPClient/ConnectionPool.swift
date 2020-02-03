@@ -280,7 +280,6 @@ class ConnectionPool {
         }
 
         func release(connection: Connection) {
-            // FIXME: See if we don't reach this
             self.preconditionIsOpened()
             let action = self.parentPool.connectionProvidersLock.withLock {
                 self.stateLock.withLock { self.state.releaseAction(for: connection) }
@@ -417,6 +416,7 @@ class ConnectionPool {
             }
         }
 
+        // FIXME: Should this be a precondition or an assertion?
         private func preconditionIsOpened() {
             self.stateLock.withLock {
                 precondition(self.state.isClosed == false, "Attempting to use closed HTTP1ConnectionProvider")

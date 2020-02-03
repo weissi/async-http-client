@@ -106,7 +106,6 @@ public class HTTPClient {
             closeError = HTTPClientError.uncleanShutdown
         }
 
-        // FIXME: May `tasks` contain already cancelled tasks?
         for task in tasks {
             task.cancel()
         }
