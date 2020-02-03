@@ -567,7 +567,7 @@ extension HTTPClient {
                 }
 
             } else {
-                // FIXME: Check what should happen when we reach this
+                // TODO: This is only reached in some internal unit t
                 return self.eventLoop.makeSucceededFuture(())
             }
         }
