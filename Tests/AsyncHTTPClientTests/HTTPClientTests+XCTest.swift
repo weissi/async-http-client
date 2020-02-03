@@ -80,6 +80,7 @@ extension HTTPClientTests {
             ("testShutdownBeforeTasksCompletion", testShutdownBeforeTasksCompletion),
             ("testUncleanShutdownActuallyShutsDown", testUncleanShutdownActuallyShutsDown),
             ("testUncleanShutdownCancelsTasks", testUncleanShutdownCancelsTasks),
+            ("testDoubleShutdown", testDoubleShutdown),
         ]
     }
 }

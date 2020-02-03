@@ -520,7 +520,6 @@ extension HTTPClient {
                     cancelled = true
                     return self.connection?.channel
                 } else {
-                    assertionFailure("Calling cancel() on an already canceled task")
                     return nil
                 }
             }

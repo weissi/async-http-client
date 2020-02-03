@@ -50,9 +50,9 @@ public class HTTPClient {
     let eventLoopGroupProvider: EventLoopGroupProvider
     let configuration: Configuration
     let pool: ConnectionPool
-    let isShutdown = NIOAtomic.makeAtomic(value: false)
+    var state: State
     private var tasks = [UUID: TaskProtocol]()
-    private let tasksLock = Lock()
+    private let stateLock = Lock()
 
     /// Create an `HTTPClient` with specified `EventLoopGroup` provider and configuration.
     ///
@@ -69,10 +69,11 @@ public class HTTPClient {
         }
         self.configuration = configuration
         self.pool = ConnectionPool(configuration: configuration)
+        self.state = .upAndRunning
     }
 
     deinit {
-        assert(self.isShutdown.load(), "Client not shut down before the deinit. Please call client.syncShutdown() when no longer needed.")
+        assert(self.state == .shutDown, "Client not shut down before the deinit. Please call client.syncShutdown() when no longer needed.")
     }
 
     /// Shuts down the client and `EventLoopGroup` if it was created by the client.
@@ -93,13 +94,19 @@ public class HTTPClient {
     public func syncShutdown(requiresCleanClose: Bool) throws {
         var closeError: Error?
 
-        let tasks = self.tasksLock.withLock {
-            self.tasks.values
+        let tasks = try self.stateLock.withLock { () -> Dictionary<UUID, TaskProtocol>.Values in
+            guard self.state == .upAndRunning else {
+                throw HTTPClientError.alreadyShutdown
+            }
+            self.state = .shuttingDown
+            return self.tasks.values
         }
-        if !tasks.isEmpty {
-            // FIXME: May tasks contain already cancelled tasks?
+
+        if !tasks.isEmpty, requiresCleanClose {
             closeError = HTTPClientError.uncleanShutdown
         }
+
+        // FIXME: May `tasks` contain already cancelled tasks?
         for task in tasks {
             task.cancel()
         }
@@ -113,15 +120,19 @@ public class HTTPClient {
         }
 
         do {
-            switch self.eventLoopGroupProvider {
-            case .shared:
-                self.isShutdown.store(true)
-                return
-            case .createNew:
-                if self.isShutdown.compareAndExchange(expected: false, desired: true) {
-                    try self.eventLoopGroup.syncShutdownGracefully()
-                } else {
-                    throw HTTPClientError.alreadyShutdown
+            try self.stateLock.withLock {
+                switch self.eventLoopGroupProvider {
+                case .shared:
+                    self.state = .shutDown
+                    return
+                case .createNew:
+                    switch self.state {
+                    case .shuttingDown:
+                        self.state = .shutDown
+                        try self.eventLoopGroup.syncShutdownGracefully()
+                    case .shutDown, .upAndRunning:
+                        assertionFailure("The only valid state at this point is \(State.shutDown)")
+                    }
                 }
             }
         } catch {
@@ -252,6 +263,16 @@ public class HTTPClient {
                                                               delegate: Delegate,
                                                               eventLoop eventLoopPreference: EventLoopPreference,
                                                               deadline: NIODeadline? = nil) -> Task<Delegate.Response> {
+        // FIXME: Is this correct to assert?
+        self.stateLock.withLock {
+            switch state {
+            case .upAndRunning:
+                break
+            case .shuttingDown, .shutDown:
+                assertionFailure("Attempting to execute a request on shutdown client")
+            }
+        }
+
         let taskEL: EventLoop
         switch eventLoopPreference.preference {
         case .indifferent:
@@ -284,13 +305,13 @@ public class HTTPClient {
         }
 
         let task = Task<Delegate.Response>(eventLoop: taskEL)
-        self.tasksLock.withLock {
+        self.stateLock.withLock {
             self.tasks[task.id] = task
         }
         let promise = task.promise
 
         promise.futureResult.whenComplete { _ in
-            self.tasksLock.withLock {
+            self.stateLock.withLock {
                 self.tasks[task.id] = nil
             }
         }
@@ -466,6 +487,12 @@ public class HTTPClient {
         case disabled
         /// Decompression is enabled.
         case enabled(limit: NIOHTTPDecompression.DecompressionLimit)
+    }
+
+    enum State {
+        case upAndRunning
+        case shuttingDown
+        case shutDown
     }
 }
 

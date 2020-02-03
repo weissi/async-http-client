@@ -1118,7 +1118,7 @@ class HTTPClientTests: XCTestCase {
         let client = HTTPClient(eventLoopGroupProvider: .shared(elg))
         let req = try HTTPClient.Request(url: "http://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "500"])
         let res = client.execute(request: req)
-        try client.syncShutdown(requiresCleanClose: false)
+        XCTAssertNoThrow(try client.syncShutdown(requiresCleanClose: false))
         _ = try? res.timeout(after: .seconds(2)).wait()
         try httpBin.shutdown()
         try elg.syncShutdownGracefully()
@@ -1162,6 +1162,20 @@ class HTTPClientTests: XCTestCase {
                 } else {
                     XCTFail("Unexpected error: \(error)")
                 }
+            }
+        }
+    }
+
+    func testDoubleShutdown() {
+        let client = HTTPClient(eventLoopGroupProvider: .createNew)
+        XCTAssertNoThrow(try client.syncShutdown())
+        do {
+            try client.syncShutdown()
+            XCTFail("Shutdown should fail with \(HTTPClientError.alreadyShutdown)")
+        } catch {
+            guard let clientError = error as? HTTPClientError, clientError == .alreadyShutdown else {
+                XCTFail("Unexpected error: \(error) instead of \(HTTPClientError.alreadyShutdown)")
+                return
             }
         }
     }
