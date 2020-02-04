@@ -322,11 +322,14 @@ class ConnectionPool {
                     channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes)
                 }.map {
                     let connection = Connection(key: self.key, channel: channel, parentPool: self.parentPool)
-                    self.configureCloseCallback(of: connection)
                     connection.isLeased = true
                     return connection
                 }
-            }.and(handshakePromise.futureResult).map { $0.0 }
+            }.and(handshakePromise.futureResult).map { (arg) -> ConnectionPool.Connection in
+                let (connection, _) = arg
+                self.configureCloseCallback(of: connection)
+                return connection
+            }
 
             connection.whenFailure { _ in
                 let action = self.stateLock.withLock {
@@ -377,12 +380,7 @@ class ConnectionPool {
                     waiter.promise.fail(HTTPClientError.cancelled)
                 }
                 self.state.isClosed = true
-                if requiresCleanClose {
-                    // TODO: This should probably become an assertion
-                    if self.state.leased != 0 {
-                        closeError = HTTPClientError.uncleanShutdown
-                    }
-                }
+                assert(self.state.leased == 0, "Invalid number of leased connections on close: \(self.state.leased)")
                 return self.state.availableConnections
             }
             do {
@@ -424,7 +422,11 @@ class ConnectionPool {
             fileprivate var availableConnections: CircularBuffer<Connection> = .init(initialCapacity: 8)
 
             /// The number of currently leased connections
-            fileprivate var leased: Int = 0
+            fileprivate var leased: Int = 0 {
+                didSet {
+                    assert((0...self.maximumConcurrentConnections).contains(self.leased), "Invalid number of leased connections (\(self.leased))")
+                }
+            }
 
             /// Consumers that weren't able to get a new connection without exceeding
             /// `maximumConcurrentConnections` get a `Future<Connection>`
@@ -526,8 +528,6 @@ class ConnectionPool {
             fileprivate mutating func failedConnectionAction() -> ClosedConnectionRemoveAction {
                 if let firstWaiter = self.waiters.popFirst() {
                     let (el, _) = self.resolvePreference(firstWaiter.preference)
-                    // FIXME: See why that's right
-                    self.leased += 1
                     return .makeConnectionAndComplete(el, firstWaiter.promise)
                 } else {
                     self.leased -= 1
