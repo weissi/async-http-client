@@ -84,10 +84,11 @@ class ConnectionPool {
     }
 
     func release(_ connection: Connection) {
-        self.connectionProvidersLock.withLock {
-            if let connectionProvider = self.connectionProviders[connection.key] {
-                connectionProvider.release(connection: connection)
-            }
+        let connectionProvider = self.connectionProvidersLock.withLock {
+            self.connectionProviders[connection.key]
+        }
+        if let connectionProvider = connectionProvider {
+            connectionProvider.release(connection: connection)
         }
     }
 
