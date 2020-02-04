@@ -25,8 +25,8 @@ class ConnectionPool {
 
     /// The main data structure used by the `ConnectionPool` to retreive and create connections associated
     /// to a a given `Key` .
-    /// - Warning: This property shouldn't be directly accessed, use the `ConnectionPool` subscript instead
-    var _connectionProviders: [Key: HTTP1ConnectionProvider] = [:]
+    /// - Warning: This property should be accessed with proper synchronization, see `connectionProvidersLock`
+    var connectionProviders: [Key: HTTP1ConnectionProvider] = [:]
 
     /// The lock used by the connection pool used to ensure correct synchronization of accesses to `_connectionProviders`
     ///
@@ -39,14 +39,6 @@ class ConnectionPool {
         self.configuration = configuration
     }
 
-    /// This enables the connection pool to store and retreive `HTTP1ConnectionProvider`s
-    /// by ensuring thread safety using the `connectionProvidersLock`.
-    private subscript(key: Key) -> HTTP1ConnectionProvider? {
-        return self.connectionProvidersLock.withLock {
-            _connectionProviders[key]
-        }
-    }
-
     /// Gets the `EventLoop` associated to the given `Key` if it exists
     ///
     /// This is part of optimization used by the `.execute(...)` method when
@@ -54,7 +46,9 @@ class ConnectionPool {
     /// Having a default `EventLoop` shared by the *channel* and the *delegate* avoids
     /// loss of performance due to `EventLoop` hoping
     func associatedEventLoop(for key: Key) -> EventLoop? {
-        return self[key]?.eventLoop
+        return self.connectionProvidersLock.withLock {
+            self.connectionProviders[key]?.eventLoop
+        }
     }
 
     /// This method asks the pool for a connection usable by the specified `request`, respecting the specified options.
@@ -71,14 +65,14 @@ class ConnectionPool {
         let key = Key(request)
 
         let provider: HTTP1ConnectionProvider = self.connectionProvidersLock.withLock {
-            if let existing = self._connectionProviders[key] {
+            if let existing = self.connectionProviders[key] {
                 existing.stateLock.withLock {
                     existing.state.pending += 1
                 }
                 return existing
             } else {
                 let http1Provider = HTTP1ConnectionProvider(key: key, eventLoop: eventLoop, configuration: self.configuration, parentPool: self)
-                self._connectionProviders[key] = http1Provider
+                self.connectionProviders[key] = http1Provider
                 http1Provider.stateLock.withLock {
                     http1Provider.state.pending += 1
                 }
@@ -90,13 +84,15 @@ class ConnectionPool {
     }
 
     func release(_ connection: Connection) {
-        if let connectionProvider = self[connection.key] {
-            connectionProvider.release(connection: connection)
+        self.connectionProvidersLock.withLock {
+            if let connectionProvider = self.connectionProviders[connection.key] {
+                connectionProvider.release(connection: connection)
+            }
         }
     }
 
     func syncClose(requiresCleanClose: Bool) throws {
-        let connectionProviders = self.connectionProvidersLock.withLock { _connectionProviders.values }
+        let connectionProviders = self.connectionProvidersLock.withLock { self.connectionProviders.values }
         var closeError: Error?
         for connectionProvider in connectionProviders {
             do {
@@ -553,7 +549,7 @@ class ConnectionPool {
             }
 
             fileprivate mutating func removeFromPool() {
-                self.parentPool._connectionProviders[self.key] = nil
+                self.parentPool.connectionProviders[self.key] = nil
                 self.isClosed = true
             }
 
