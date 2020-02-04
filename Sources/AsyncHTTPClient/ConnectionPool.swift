@@ -42,15 +42,8 @@ class ConnectionPool {
     /// This enables the connection pool to store and retreive `HTTP1ConnectionProvider`s
     /// by ensuring thread safety using the `connectionProvidersLock`.
     private subscript(key: Key) -> HTTP1ConnectionProvider? {
-        get {
-            return self.connectionProvidersLock.withLock {
-                _connectionProviders[key]
-            }
-        }
-        set {
-            self.connectionProvidersLock.withLock {
-                _connectionProviders[key] = newValue
-            }
+        return self.connectionProvidersLock.withLock {
+            _connectionProviders[key]
         }
     }
 
