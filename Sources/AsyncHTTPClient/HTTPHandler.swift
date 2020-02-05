@@ -498,6 +498,12 @@ extension HTTPClient {
             self.lock = Lock()
         }
 
+        static func failedTask(eventLoop: EventLoop, error: Error) -> Task<Response> {
+            let task = self.init(eventLoop: eventLoop)
+            task.promise.fail(error)
+            return task
+        }
+
         /// `EventLoopFuture` for the response returned by this request.
         public var futureResult: EventLoopFuture<Response> {
             return self.promise.futureResult
@@ -564,7 +570,9 @@ extension HTTPClient {
                 }
 
             } else {
-                // TODO: This is only reached in some internal unit t
+                // TODO: This seems only reached in some internal unit test
+                // Maybe there could be a better handling in the future to make
+                // it an error outside of testing contexts
                 return self.eventLoop.makeSucceededFuture(())
             }
         }

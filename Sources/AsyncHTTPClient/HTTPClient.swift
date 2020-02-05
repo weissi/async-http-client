@@ -262,16 +262,6 @@ public class HTTPClient {
                                                               delegate: Delegate,
                                                               eventLoop eventLoopPreference: EventLoopPreference,
                                                               deadline: NIODeadline? = nil) -> Task<Delegate.Response> {
-        // FIXME: Is this correct to assert?
-        self.stateLock.withLock {
-            switch state {
-            case .upAndRunning:
-                break
-            case .shuttingDown, .shutDown:
-                assertionFailure("Attempting to execute a request on shutdown client")
-            }
-        }
-
         let taskEL: EventLoop
         switch eventLoopPreference.preference {
         case .indifferent:
@@ -284,6 +274,19 @@ public class HTTPClient {
             taskEL = eventLoop
         case .testOnly_exact(_, delegateOn: let delegateEL):
             taskEL = delegateEL
+        }
+
+        let failedTask: Task<Delegate.Response>? = self.stateLock.withLock {
+            switch state {
+            case .upAndRunning:
+                return nil
+            case .shuttingDown, .shutDown:
+                return Task<Delegate.Response>.failedTask(eventLoop: taskEL, error: HTTPClientError.alreadyShutdown)
+            }
+        }
+
+        if let failedTask = failedTask {
+            return failedTask
         }
 
         let redirectHandler: RedirectHandler<Delegate.Response>?

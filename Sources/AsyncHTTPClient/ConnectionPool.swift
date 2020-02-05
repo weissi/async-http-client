@@ -404,7 +404,6 @@ class ConnectionPool {
             }
         }
 
-        // FIXME: Should this be a precondition or an assertion?
         private func preconditionIsOpened() {
             self.stateLock.withLock {
                 precondition(self.state.isClosed == false, "Attempting to use closed HTTP1ConnectionProvider")
