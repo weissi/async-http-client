@@ -86,11 +86,6 @@ extension CircularBuffer {
             return nil
         }
     }
-
-    @discardableResult
-    mutating func swapRemoveWhereOrFirst(where predicate: (Element) throws -> Bool) rethrows -> Element? {
-        return try self.swapRemove(where: predicate) ?? self.popFirst()
-    }
 }
 
 extension ConnectionPool.Connection {
