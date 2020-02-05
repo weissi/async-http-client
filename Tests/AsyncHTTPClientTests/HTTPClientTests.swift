@@ -1179,4 +1179,23 @@ class HTTPClientTests: XCTestCase {
             }
         }
     }
+
+    func testTaskFailsWhenClientIsShutdown() {
+        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        defer {
+            XCTAssertNoThrow(try elg.syncShutdownGracefully())
+        }
+        let client = HTTPClient(eventLoopGroupProvider: .shared(elg))
+        XCTAssertNoThrow(try client.syncShutdown(requiresCleanClose: true))
+        do {
+            _ = try client.get(url: "http://localhost/").wait()
+            XCTFail("Request shouldn't succeed")
+        } catch {
+            if let error = error as? HTTPClientError, error == .alreadyShutdown {
+                return
+            } else {
+                XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
 }

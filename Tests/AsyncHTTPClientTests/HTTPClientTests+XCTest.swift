@@ -81,6 +81,7 @@ extension HTTPClientTests {
             ("testUncleanShutdownActuallyShutsDown", testUncleanShutdownActuallyShutsDown),
             ("testUncleanShutdownCancelsTasks", testUncleanShutdownCancelsTasks),
             ("testDoubleShutdown", testDoubleShutdown),
+            ("testTaskFailsWhenClientIsShutdown", testTaskFailsWhenClientIsShutdown),
         ]
     }
 }
