@@ -68,7 +68,7 @@ extension ClientBootstrap {
 
 extension CircularBuffer {
     @discardableResult
-    mutating func swapRemove(at index: Index) -> Element? {
+    mutating func swapWithFirstAndRemove(at index: Index) -> Element? {
         precondition(index >= self.startIndex && index < self.endIndex)
         if !self.isEmpty {
             self.swapAt(self.startIndex, index)
@@ -79,9 +79,9 @@ extension CircularBuffer {
     }
 
     @discardableResult
-    mutating func swapRemove(where predicate: (Element) throws -> Bool) rethrows -> Element? {
+    mutating func swapWithFirstAndRemove(where predicate: (Element) throws -> Bool) rethrows -> Element? {
         if let existingIndex = try self.firstIndex(where: predicate) {
-            return self.swapRemove(at: existingIndex)
+            return self.swapWithFirstAndRemove(at: existingIndex)
         } else {
             return nil
         }

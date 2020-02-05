@@ -19,7 +19,9 @@ import NIOHTTP1
 import NIOTLS
 
 /// A connection pool that manages and creates new connections to hosts respecting the specified preferences
-class ConnectionPool {
+///
+/// - Note: All `internal` methods of this class are thread safe
+final class ConnectionPool {
     /// The configuration used to bootstrap new HTTP connections
     private let configuration: HTTPClient.Configuration
 
@@ -44,7 +46,7 @@ class ConnectionPool {
     /// This is part of optimization used by the `.execute(...)` method when
     /// a request has its `EventLoopPreference` property set to `.indifferent`.
     /// Having a default `EventLoop` shared by the *channel* and the *delegate* avoids
-    /// loss of performance due to `EventLoop` hoping
+    /// loss of performance due to `EventLoop` hopping
     func associatedEventLoop(for key: Key) -> EventLoop? {
         return self.connectionProvidersLock.withLock {
             self.connectionProviders[key]?.eventLoop
@@ -199,7 +201,7 @@ class ConnectionPool {
         }
     }
 
-    /// A connection provider of `HTTP/1.1` connections to a given `Key` (host, scheme, port)
+    /// A connection provider of `HTTP/1.1` connections with a given `Key` (host, scheme, port)
     ///
     /// On top of enabling connection reuse this provider it also facilitates the creation
     /// of concurrent requests as it has built-in politness regarding the maximum number
@@ -453,7 +455,7 @@ class ConnectionPool {
                     self.leased += 1
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(preference)
 
-                    if let connection = availableConnections.swapRemove(where: { $0.channel.eventLoop === channelEL }) {
+                    if let connection = availableConnections.swapWithFirstAndRemove(where: { $0.channel.eventLoop === channelEL }) {
                         connection.isLeased = true
                         return .leaseConnection(connection)
                     } else {
@@ -514,7 +516,7 @@ class ConnectionPool {
                         return .makeConnectionAndComplete(el, firstWaiter.promise)
                     }
                 } else {
-                    self.availableConnections.swapRemove(where: { $0 === connection })
+                    self.availableConnections.swapWithFirstAndRemove(where: { $0 === connection })
                 }
 
                 if self.providerMustClose() {
