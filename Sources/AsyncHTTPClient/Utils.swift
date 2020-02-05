@@ -66,19 +66,6 @@ extension ClientBootstrap {
     }
 }
 
-func resolve(timeout: TimeAmount?, deadline: NIODeadline?) -> TimeAmount? {
-    switch (timeout, deadline) {
-    case (.some(let timeout), .some(let deadline)):
-        return min(timeout, deadline - .now())
-    case (.some(let timeout), .none):
-        return timeout
-    case (.none, .some(let deadline)):
-        return deadline - .now()
-    case (.none, .none):
-        return nil
-    }
-}
-
 extension CircularBuffer {
     @discardableResult
     mutating func swapRemove(at index: Index) -> Element? {
