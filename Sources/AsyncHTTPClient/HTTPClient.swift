@@ -320,43 +320,49 @@ public class HTTPClient {
 
         let connection = self.pool.getConnection(for: request, preference: eventLoopPreference, on: taskEL, deadline: deadline)
 
-        connection.flatMap { connection -> EventLoopFuture<Void> in
-            let channel = connection.channel
-            let addedFuture: EventLoopFuture<Void>
+        _ = connection
+            .flatMap { connection -> EventLoopFuture<Void> in
+                let channel = connection.channel
+                let addedFuture: EventLoopFuture<Void>
 
-            switch self.configuration.decompression {
-            case .disabled:
-                addedFuture = channel.eventLoop.makeSucceededFuture(())
-            case .enabled(let limit):
-                let decompressHandler = NIOHTTPResponseDecompressor(limit: limit)
-                addedFuture = channel.pipeline.addHandler(decompressHandler, name: "decompressHandler")
+                switch self.configuration.decompression {
+                case .disabled:
+                    addedFuture = channel.eventLoop.makeSucceededFuture(())
+                case .enabled(let limit):
+                    let decompressHandler = NIOHTTPResponseDecompressor(limit: limit)
+                    addedFuture = channel.pipeline.addHandler(decompressHandler)
+                }
+
+                return addedFuture.flatMap {
+                    if let timeout = self.resolve(timeout: self.configuration.timeout.read, deadline: deadline) {
+                        return channel.pipeline.addHandler(IdleStateHandler(readTimeout: timeout))
+                    } else {
+                        return channel.eventLoop.makeSucceededFuture(())
+                    }
+                }.flatMap {
+                    let taskHandler = TaskHandler(task: task, delegate: delegate, redirectHandler: redirectHandler, ignoreUncleanSSLShutdown: self.configuration.ignoreUncleanSSLShutdown)
+                    return channel.pipeline.addHandler(taskHandler)
+                }.flatMap {
+                    task.setConnection(connection)
+
+                    let isCancelled = task.lock.withLock {
+                        task.cancelled
+                    }
+
+                    if !isCancelled {
+                        return channel.writeAndFlush(request).flatMapError { _ in
+                            // At this point the `TaskHandler` will already be present
+                            // to handle the failure and pass it to the `promise`
+                            channel.eventLoop.makeSucceededFuture(())
+                        }
+                    } else {
+                        return channel.eventLoop.makeSucceededFuture(())
+                    }
+                }
+            }.whenFailure {
+                promise.fail($0)
             }
 
-            return addedFuture.flatMap {
-                if let timeout = self.resolve(timeout: self.configuration.timeout.read, deadline: deadline) {
-                    return channel.pipeline.addHandler(IdleStateHandler(readTimeout: timeout), name: "timeoutHandler")
-                } else {
-                    return channel.eventLoop.makeSucceededFuture(())
-                }
-            }.flatMap {
-                let taskHandler = TaskHandler(task: task, delegate: delegate, redirectHandler: redirectHandler, ignoreUncleanSSLShutdown: self.configuration.ignoreUncleanSSLShutdown)
-                return channel.pipeline.addHandler(taskHandler, name: "taskHandler")
-            }.flatMap {
-                task.setConnection(connection)
-
-                let isCancelled = task.lock.withLock {
-                    task.cancelled
-                }
-
-                if !isCancelled {
-                    return channel.writeAndFlush(request)
-                } else {
-                    return channel.eventLoop.makeSucceededFuture(())
-                }
-            }
-        }.whenFailure {
-            promise.fail($0)
-        }
         return task
     }
 

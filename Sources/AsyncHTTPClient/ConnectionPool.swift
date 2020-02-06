@@ -319,7 +319,7 @@ final class ConnectionPool {
                 channel = bootstrap.connect(unixDomainSocketPath: self.key.unixPath)
             }
 
-            let connection = channel.flatMap { channel -> EventLoopFuture<ConnectionPool.Connection> in
+            return channel.flatMap { channel -> EventLoopFuture<ConnectionPool.Connection> in
                 channel.pipeline.addSSLHandlerIfNeeded(for: self.key, tlsConfiguration: self.configuration.tlsConfiguration, handshakePromise: handshakePromise).flatMap {
                     channel.pipeline.addHTTPClientHandlers(leftOverBytesStrategy: .forwardBytes)
                 }.map {
@@ -331,9 +331,7 @@ final class ConnectionPool {
                 let (connection, _) = arg
                 self.configureCloseCallback(of: connection)
                 return connection
-            }
-
-            connection.whenFailure { _ in
+            }.flatMapError { error in
                 let action = self.stateLock.withLock {
                     self.state.failedConnectionAction()
                 }
@@ -343,9 +341,8 @@ final class ConnectionPool {
                 case .none:
                     break
                 }
+                return self.eventLoop.makeFailedFuture(error)
             }
-
-            return connection
         }
 
         /// Adds a callback on connection close that asks the `state` what to do about this
