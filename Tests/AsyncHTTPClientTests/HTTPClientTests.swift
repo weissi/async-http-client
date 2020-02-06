@@ -1244,4 +1244,59 @@ class HTTPClientTests: XCTestCase {
             }
         }
     }
+
+    func testRaceNewRequestsVsShutdown() {
+        let numberOfWorkers = 20
+        let allWorkersReady = DispatchSemaphore(value: 0)
+        let allWorkersGo = DispatchSemaphore(value: 0)
+        let allDone = DispatchGroup()
+
+        let httpBin = HTTPBin()
+        defer {
+            XCTAssertNoThrow(try httpBin.shutdown())
+        }
+        let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
+        defer {
+            XCTAssertThrowsError(try httpClient.syncShutdown()) { error in
+                XCTAssertEqual(.alreadyShutdown, error as? HTTPClientError)
+            }
+        }
+
+        let url = "http://localhost:\(httpBin.port)/get"
+        XCTAssertNoThrow(XCTAssertEqual(.ok, try httpClient.get(url: url).wait().status))
+
+        for w in 0..<numberOfWorkers {
+            let q = DispatchQueue(label: "worker \(w)")
+            q.async(group: allDone) {
+                func go() {
+                    allWorkersReady.signal() // tell the driver we're ready
+                    allWorkersGo.wait() // wait for the driver to let us go
+
+                    do {
+                        while true {
+                            let result = try httpClient.get(url: url).wait().status
+                            XCTAssertEqual(.ok, result)
+                        }
+                    } catch {
+                        // ok, we failed, pool probably shutdown
+                        XCTAssertEqual(.cancelled, error as? HTTPClientError)
+                    }
+                }
+                go()
+            }
+        }
+
+        for _ in 0..<numberOfWorkers {
+            allWorkersReady.wait()
+        }
+        // now all workers should be waiting for the go signal
+
+        for _ in 0..<numberOfWorkers {
+            allWorkersGo.signal()
+        }
+        Thread.sleep(until: .init(timeIntervalSinceNow: 0.2))
+        XCTAssertNoThrow(try httpClient.syncShutdown())
+        // all workers should be running, let's wait for them to finish
+        allDone.wait()
+    }
 }
