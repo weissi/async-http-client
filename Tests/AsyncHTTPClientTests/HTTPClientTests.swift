@@ -1299,4 +1299,42 @@ class HTTPClientTests: XCTestCase {
         // all workers should be running, let's wait for them to finish
         allDone.wait()
     }
+
+    func testVaryingLoopPreference() throws {
+        let elg = MultiThreadedEventLoopGroup(numberOfThreads: 2)
+        let first = elg.next()
+        let second = elg.next()
+        XCTAssert(first !== second)
+        let client = HTTPClient(eventLoopGroupProvider: .shared(elg))
+        let httpBin = HTTPBin()
+
+        defer {
+            XCTAssertNoThrow(try client.syncShutdown(requiresCleanClose: true))
+            XCTAssertNoThrow(try httpBin.shutdown())
+            XCTAssertNoThrow(try elg.syncShutdownGracefully())
+        }
+
+        var futureResults = [EventLoopFuture<HTTPClient.Response>]()
+        for i in 1...100 {
+            let request = try HTTPClient.Request(url: "http://localhost:\(httpBin.port)/get", method: .GET, headers: ["X-internal-delay": "10"])
+            let preference: HTTPClient.EventLoopPreference
+            if i <= 50 {
+                preference = .delegateAndChannel(on: first)
+            } else {
+                preference = .delegateAndChannel(on: second)
+            }
+            futureResults.append(client.execute(request: request, eventLoop: preference))
+        }
+
+        let results = try EventLoopFuture.whenAllComplete(futureResults, on: elg.next()).wait()
+
+        for result in results {
+            switch result {
+            case .success:
+                break
+            case .failure(let error):
+                XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
 }

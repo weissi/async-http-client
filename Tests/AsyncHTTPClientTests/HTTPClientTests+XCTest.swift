@@ -84,6 +84,7 @@ extension HTTPClientTests {
             ("testDoubleShutdown", testDoubleShutdown),
             ("testTaskFailsWhenClientIsShutdown", testTaskFailsWhenClientIsShutdown),
             ("testRaceNewRequestsVsShutdown", testRaceNewRequestsVsShutdown),
+            ("testVaryingLoopPreference", testVaryingLoopPreference),
         ]
     }
 }
