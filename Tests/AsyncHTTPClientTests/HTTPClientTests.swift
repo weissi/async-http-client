@@ -1279,7 +1279,11 @@ class HTTPClientTests: XCTestCase {
                         }
                     } catch {
                         // ok, we failed, pool probably shutdown
-                        XCTAssertEqual(.cancelled, error as? HTTPClientError)
+                        if let clientError = error as? HTTPClientError, clientError == .cancelled || clientError == .alreadyShutdown {
+                            return
+                        } else {
+                            XCTFail("Unexpected error: \(error)")
+                        }
                     }
                 }
                 go()

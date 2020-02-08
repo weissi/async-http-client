@@ -94,21 +94,17 @@ final class ConnectionPool {
         }
     }
 
-    func syncClose(requiresCleanClose: Bool) throws {
+    func prepareForClose() {
         let connectionProviders = self.connectionProvidersLock.withLock { self.connectionProviders.values }
-        var closeError: Error?
         for connectionProvider in connectionProviders {
-            do {
-                try connectionProvider.syncClose(requiresCleanClose: requiresCleanClose)
-            } catch {
-                if closeError == nil {
-                    closeError = error
-                }
-            }
+            connectionProvider.prepareForClose()
         }
+    }
 
-        if let closeError = closeError {
-            throw closeError
+    func syncClose() {
+        let connectionProviders = self.connectionProvidersLock.withLock { self.connectionProviders.values }
+        for connectionProvider in connectionProviders {
+            connectionProvider.syncClose()
         }
     }
 
@@ -254,6 +250,7 @@ final class ConnectionPool {
         }
 
         deinit {
+            assert(self.state.activity == .closed, "Non closed on deinit")
             assert(self.state.availableConnections.isEmpty, "Available connections should be empty before deinit")
             assert(self.state.leased == 0, "All leased connections should have been returned before deinit")
         }
@@ -369,43 +366,34 @@ final class ConnectionPool {
             }
         }
 
-        func syncClose(requiresCleanClose: Bool) throws {
-            var closeError: Error?
-            let availableConnections = self.stateLock.withLock { () -> CircularBuffer<ConnectionPool.Connection> in
-                assert(!self.state.isClosed, "Calling syncClose on an already closed provider")
+        func prepareForClose() {
+            let (waitersFutures, closeFutures) = self.stateLock.withLock { () -> ([EventLoopFuture<Connection>], [EventLoopFuture<Void>]) in
+                assert(self.state.activity == .opened, "Invalid activity: \(self.state.activity)")
+                self.state.activity = .closing
+                // Fail waiters
                 let waitersCopy = self.state.waiters
                 self.state.waiters.removeAll()
-                for waiter in waitersCopy {
-                    waiter.promise.fail(HTTPClientError.cancelled)
-                }
-                self.state.isClosed = true
-                assert(self.state.leased == 0, "Invalid number of leased connections on close: \(self.state.leased)")
-                return self.state.availableConnections
+                let waitersPromises = waitersCopy.map { $0.promise }
+                let waitersFutures = waitersPromises.map { $0.futureResult }
+                waitersPromises.forEach { $0.fail(HTTPClientError.cancelled) }
+                let closeFutures = self.state.availableConnections.map { $0.channel.close() }
+                return (waitersFutures, closeFutures)
             }
-            do {
-                try EventLoopFuture<Void>.andAllComplete(availableConnections.map { $0.channel.close() }, on: self.eventLoop).wait()
-            } catch ChannelError.alreadyClosed {
-                return
-            } catch {
-                // First catched errors have priority, this
-                // is to be consistent with what would happen
-                // if the `throw` wasn't delayed until everything
-                // is executed
-                if closeError == nil {
-                    closeError = error
-                }
-            }
+            try? EventLoopFuture<Connection>.andAllComplete(waitersFutures, on: self.eventLoop).wait()
+            try? EventLoopFuture<Void>.andAllComplete(closeFutures, on: self.eventLoop).wait()
+        }
 
-            self.stateLock.withLock { self.state.availableConnections.removeAll() }
-
-            if let closeError = closeError {
-                throw closeError
+        func syncClose() {
+            self.stateLock.withLock {
+                assert(self.state.activity == .closing)
+                self.state.activity = .closed
             }
         }
 
         private func preconditionIsOpened() {
             self.stateLock.withLock {
-                precondition(self.state.isClosed == false, "Attempting to use closed HTTP1ConnectionProvider")
+                // FIXME: Better distinguish between closing and closed
+                precondition(self.state.activity != .closed, "Attempting to use closed HTTP1ConnectionProvider")
             }
         }
 
@@ -432,7 +420,7 @@ final class ConnectionPool {
             /// as soon as possible by the provider, in FIFO order.
             fileprivate var waiters: CircularBuffer<Waiter> = .init(initialCapacity: 8)
 
-            fileprivate var isClosed: Bool = false
+            fileprivate var activity: Activity = .opened
 
             fileprivate var pending: Int = 0
 
@@ -544,12 +532,13 @@ final class ConnectionPool {
             }
 
             private func providerMustClose() -> Bool {
-                return self.pending == 0 && !self.isClosed && self.leased == 0 && self.availableConnections.isEmpty && self.waiters.isEmpty
+                return self.pending == 0 && self.activity != .closed && self.leased == 0 && self.availableConnections.isEmpty && self.waiters.isEmpty
             }
 
             fileprivate mutating func removeFromPool() {
                 self.parentPool.connectionProviders[self.key] = nil
-                self.isClosed = true
+                // FIXME: This is redundant
+                self.activity = .closed
             }
 
             private func resolvePreference(_ preference: HTTPClient.EventLoopPreference) -> (EventLoop, Bool) {
@@ -593,6 +582,12 @@ final class ConnectionPool {
                 /// The event loop preference associated to this particular request
                 /// that the provider should respect
                 let preference: HTTPClient.EventLoopPreference
+            }
+
+            enum Activity {
+                case opened
+                case closing
+                case closed
             }
         }
     }

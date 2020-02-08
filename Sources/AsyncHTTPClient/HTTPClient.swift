@@ -95,12 +95,14 @@ public class HTTPClient {
         var closeError: Error?
 
         let tasks = try self.stateLock.withLock { () -> Dictionary<UUID, TaskProtocol>.Values in
-            guard self.state == .upAndRunning else {
+            if self.state != .upAndRunning {
                 throw HTTPClientError.alreadyShutdown
             }
             self.state = .shuttingDown
             return self.tasks.values
         }
+
+        self.pool.prepareForClose()
 
         if !tasks.isEmpty, requiresCleanClose {
             closeError = HTTPClientError.uncleanShutdown
@@ -112,11 +114,7 @@ public class HTTPClient {
 
         try? EventLoopFuture.andAllComplete((tasks.map { $0.completion }), on: self.eventLoopGroup.next()).wait()
 
-        do {
-            try self.pool.syncClose(requiresCleanClose: requiresCleanClose)
-        } catch {
-            closeError = error
-        }
+        self.pool.syncClose()
 
         do {
             try self.stateLock.withLock {
