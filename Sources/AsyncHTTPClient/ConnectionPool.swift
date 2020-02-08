@@ -352,7 +352,6 @@ final class ConnectionPool {
         private func configureCloseCallback(of connection: Connection) {
             connection.channel.closeFuture.whenComplete { result in
                 guard connection.shouldRunCloseCallback else {
-                    print("DID NOT EXECUTE")
                     return
                 }
                 switch result {
