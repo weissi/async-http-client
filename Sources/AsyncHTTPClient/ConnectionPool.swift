@@ -167,8 +167,7 @@ final class ConnectionPool {
             self.parentPool.release(self)
         }
 
-        fileprivate func close(runCloseCallback: Bool = true) -> EventLoopFuture<Void> {
-            self.shouldRunCloseCallback = runCloseCallback
+        fileprivate func close() -> EventLoopFuture<Void> {
             return self.channel.close()
         }
 
@@ -195,9 +194,6 @@ final class ConnectionPool {
 
         /// Indicates that this connection is about to close
         var isClosing: Bool = false
-
-        // FIXME: Check synchronization
-        fileprivate var shouldRunCloseCallback: Bool = true
 
         /// Convenience property indicating wether the underlying `Channel` is active or not
         var isActiveEstimation: Bool {
@@ -288,17 +284,8 @@ final class ConnectionPool {
             case .makeConnectionAndComplete(let eventLoop, let promise):
                 self.makeConnection(on: eventLoop).cascade(to: promise)
 
-            case .replaceConnection(let eventLoop, let promise):
-                connection.close(runCloseCallback: false).flatMap {
-                    self.makeConnection(on: eventLoop)
-                }.whenComplete { result in
-                    switch result {
-                    case .success(let connection):
-                        promise.succeed(connection)
-                    case .failure(let error):
-                        promise.fail(error)
-                    }
-                }
+            case .close:
+                _ = connection.close()
 
             case .none:
                 break
@@ -351,9 +338,6 @@ final class ConnectionPool {
         /// `ClosedConnectionRemoveAction` which instructs it about what it should do.
         private func configureCloseCallback(of connection: Connection) {
             connection.channel.closeFuture.whenComplete { result in
-                guard connection.shouldRunCloseCallback else {
-                    return
-                }
                 switch result {
                 case .success:
                     let action = self.parentPool.connectionProvidersLock.withLock {
@@ -466,7 +450,7 @@ final class ConnectionPool {
             }
 
             fileprivate mutating func releaseAction(for connection: Connection) -> ConnectionReleaseAction {
-                if let firstWaiter = waiters.popFirst() {
+                if let firstWaiter = waiters.first {
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(firstWaiter.preference)
 
                     guard connection.isActiveEstimation, !connection.isClosing else {
@@ -474,11 +458,13 @@ final class ConnectionPool {
                     }
 
                     if connection.channel.eventLoop === channelEL {
+                        self.waiters.removeFirst()
                         return .succeed(firstWaiter.promise)
                     } else {
                         if requiresSpecifiedEL {
-                            return .replaceConnection(channelEL, firstWaiter.promise)
+                            return .close
                         } else {
+                            self.waiters.removeFirst()
                             return .makeConnectionAndComplete(channelEL, firstWaiter.promise)
                         }
                     }
@@ -565,7 +551,7 @@ final class ConnectionPool {
             fileprivate enum ConnectionReleaseAction {
                 case succeed(EventLoopPromise<Connection>)
                 case makeConnectionAndComplete(EventLoop, EventLoopPromise<Connection>)
-                case replaceConnection(EventLoop, EventLoopPromise<Connection>)
+                case close
                 case none
             }
 
