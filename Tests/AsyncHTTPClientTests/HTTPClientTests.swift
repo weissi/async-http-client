@@ -1365,7 +1365,7 @@ class HTTPClientTests: XCTestCase {
 
         let seenError = DispatchGroup()
         seenError.enter()
-        var maybeSecondRequest: EventLoopFuture<HTTPClient.Response>? = nil
+        var maybeSecondRequest: EventLoopFuture<HTTPClient.Response>?
         XCTAssertNoThrow(maybeSecondRequest = try el.submit {
             let neverSucceedingRequest = httpClient.get(url: url)
             let secondRequest = neverSucceedingRequest.flatMapError { error in
@@ -1416,7 +1416,7 @@ class HTTPClientTests: XCTestCase {
                                                 XCTAssertEqual(.ok, firstResponse.status)
                                                 return httpClient.get(url: url) // <== interesting bit here
                                             }
-                                        }.wait().status))
+        }.wait().status))
     }
 
     func testMakeSecondRequestWhilstFirstIsOngoing() {
