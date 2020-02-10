@@ -1341,4 +1341,115 @@ class HTTPClientTests: XCTestCase {
             }
         }
     }
+
+    func testMakeSecondRequestDuringCancelledCallout() {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1) // needs to be 1 thread!
+        defer {
+            XCTAssertNoThrow(try group.syncShutdownGracefully())
+        }
+        let el = group.next()
+
+        let web = NIOHTTP1TestServer(group: el)
+        defer {
+            // This will throw as we've started the request but haven't fulfilled it.
+            XCTAssertThrowsError(try web.stop())
+        }
+
+        let url = "http://127.0.0.1:\(web.serverPort)"
+        let httpClient = HTTPClient(eventLoopGroupProvider: .shared(el))
+        defer {
+            XCTAssertThrowsError(try httpClient.syncShutdown(requiresCleanClose: true)) { error in
+                XCTAssertEqual(.alreadyShutdown, error as? HTTPClientError)
+            }
+        }
+
+        let seenError = DispatchGroup()
+        seenError.enter()
+        var maybeSecondRequest: EventLoopFuture<HTTPClient.Response>? = nil
+        XCTAssertNoThrow(maybeSecondRequest = try el.submit {
+            let neverSucceedingRequest = httpClient.get(url: url)
+            let secondRequest = neverSucceedingRequest.flatMapError { error in
+                XCTAssertEqual(.cancelled, error as? HTTPClientError)
+                seenError.leave()
+                return httpClient.get(url: url) // <== this is the main part, during the error callout, we call back in
+            }
+            return secondRequest
+        }.wait())
+
+        guard let secondRequest = maybeSecondRequest else {
+            XCTFail("couldn't get request future")
+            return
+        }
+
+        // Let's pull out the request .head so we know the request has started (but nothing else)
+        XCTAssertNoThrow(XCTAssertNotNil(try web.readInbound()))
+
+        XCTAssertNoThrow(try httpClient.syncShutdown())
+
+        seenError.wait()
+        XCTAssertThrowsError(try secondRequest.wait()) { error in
+            XCTAssertEqual(.alreadyShutdown, error as? HTTPClientError)
+        }
+    }
+
+    func testMakeSecondRequestDuringSuccessCallout() {
+        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1) // needs to be 1 thread!
+        defer {
+            XCTAssertNoThrow(try group.syncShutdownGracefully())
+        }
+        let el = group.next()
+
+        let web = HTTPBin()
+        defer {
+            XCTAssertNoThrow(try web.shutdown())
+        }
+
+        let url = "http://127.0.0.1:\(web.port)/get"
+        let httpClient = HTTPClient(eventLoopGroupProvider: .shared(el))
+        defer {
+            XCTAssertNoThrow(try httpClient.syncShutdown(requiresCleanClose: true))
+        }
+
+        XCTAssertNoThrow(XCTAssertEqual(.ok,
+                                        try el.flatSubmit { () -> EventLoopFuture<HTTPClient.Response> in
+                                            httpClient.get(url: url).flatMap { firstResponse in
+                                                XCTAssertEqual(.ok, firstResponse.status)
+                                                return httpClient.get(url: url) // <== interesting bit here
+                                            }
+                                        }.wait().status))
+    }
+
+    func testMakeSecondRequestWhilstFirstIsOngoing() {
+        let web = NIOHTTP1TestServer(group: self.group)
+        defer {
+            XCTAssertNoThrow(try web.stop())
+        }
+
+        let client = HTTPClient(eventLoopGroupProvider: .shared(self.group))
+        defer {
+            XCTAssertNoThrow(try client.syncShutdown())
+        }
+
+        let url = "http://127.0.0.1:\(web.serverPort)"
+        let firstRequest = client.get(url: url)
+
+        XCTAssertNoThrow(XCTAssertNotNil(try web.readInbound())) // first request: .head
+
+        // Now, the first request is ongoing but not complete, let's start a second one
+        let secondRequest = client.get(url: url)
+        XCTAssertNoThrow(XCTAssertEqual(.end(nil), try web.readInbound())) // first request: .end
+
+        XCTAssertNoThrow(try web.writeOutbound(.head(.init(version: .init(major: 1, minor: 1), status: .ok))))
+        XCTAssertNoThrow(try web.writeOutbound(.end(nil)))
+
+        XCTAssertNoThrow(XCTAssertEqual(.ok, try firstRequest.wait().status))
+
+        // Okay, first request done successfully, let's do the second one too.
+        XCTAssertNoThrow(XCTAssertNotNil(try web.readInbound())) // first request: .head
+        XCTAssertNoThrow(XCTAssertEqual(.end(nil), try web.readInbound())) // first request: .end
+
+        XCTAssertNoThrow(try web.writeOutbound(.head(.init(version: .init(major: 1, minor: 1), status: .created))))
+        XCTAssertNoThrow(try web.writeOutbound(.end(nil)))
+        XCTAssertNoThrow(XCTAssertEqual(.created, try secondRequest.wait().status))
+    }
 }
