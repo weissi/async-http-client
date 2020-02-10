@@ -441,7 +441,7 @@ class HTTPClientInternalTests: XCTestCase {
         _ = try! httpClient.execute(request: req).wait()
         let el = httpClient.eventLoopGroup.next()
         try! el.scheduleTask(in: .milliseconds(500)) {
-            XCTAssertEqual(httpClient.pool.connectionProviders.count, 0)
+            XCTAssertEqual(httpClient.pool.connectionProviderCount, 0)
         }.futureResult.wait()
     }
 }

@@ -2,7 +2,7 @@
 //
 // This source file is part of the AsyncHTTPClient open source project
 //
-// Copyright (c) 2019 Apple Inc. and the AsyncHTTPClient project authors
+// Copyright (c) 2019-2020 Apple Inc. and the AsyncHTTPClient project authors
 // Licensed under Apache License v2.0
 //
 // See LICENSE.txt for license information
@@ -28,7 +28,7 @@ final class ConnectionPool {
     /// The main data structure used by the `ConnectionPool` to retreive and create connections associated
     /// to a a given `Key` .
     /// - Warning: This property should be accessed with proper synchronization, see `connectionProvidersLock`
-    var connectionProviders: [Key: HTTP1ConnectionProvider] = [:]
+    private var connectionProviders: [Key: HTTP1ConnectionProvider] = [:]
 
     /// The lock used by the connection pool used to ensure correct synchronization of accesses to `_connectionProviders`
     ///
@@ -106,6 +106,15 @@ final class ConnectionPool {
         for connectionProvider in connectionProviders {
             connectionProvider.syncClose()
         }
+        self.connectionProvidersLock.withLock {
+            assert(self.connectionProviders.count == 0, "left-overs: \(self.connectionProviders)")
+        }
+    }
+
+    var connectionProviderCount: Int {
+        return self.connectionProvidersLock.withLock {
+            return self.connectionProviders.count
+        }
     }
 
     /// Used by the `ConnectionPool` to index its `HTTP1ConnectionProvider`s
@@ -150,7 +159,7 @@ final class ConnectionPool {
     /// so that they can be passed around together.
     ///
     /// - Warning: `Connection` properties are not thread-safe and should be used with proper synchronization
-    class Connection {
+    class Connection: CustomStringConvertible {
         init(key: Key, channel: Channel, parentPool: ConnectionPool) {
             self.key = key
             self.channel = channel
@@ -170,6 +179,10 @@ final class ConnectionPool {
         fileprivate func close(runCloseCallback: Bool = true) -> EventLoopFuture<Void> {
             self.shouldRunCloseCallback = runCloseCallback
             return self.channel.close()
+        }
+
+        var description: String {
+            return "Connection { channel: \(self.channel) }"
         }
 
         /// The connection pool this `Connection` belongs to.
@@ -210,7 +223,7 @@ final class ConnectionPool {
     /// On top of enabling connection reuse this provider it also facilitates the creation
     /// of concurrent requests as it has built-in politness regarding the maximum number
     /// of concurrent requests to the server.
-    class HTTP1ConnectionProvider {
+    class HTTP1ConnectionProvider: CustomStringConvertible {
         /// The default `EventLoop` for this provider
         ///
         /// The default event loop is used to create futures and is used
@@ -261,6 +274,11 @@ final class ConnectionPool {
             assert(self.state.activity == .closed, "Non closed on deinit")
             assert(self.state.availableConnections.isEmpty, "Available connections should be empty before deinit")
             assert(self.state.leased == 0, "All leased connections should have been returned before deinit")
+            assert(self.state.waiters.count == 0, "Waiters on deinit: \(self.state.waiters)")
+        }
+
+        var description: String {
+            return "HTTP1ConnectionProvider { key: \(self.key), state: \(self.state) }"
         }
 
         func getConnection(preference: HTTPClient.EventLoopPreference) -> EventLoopFuture<Connection> {
@@ -373,6 +391,8 @@ final class ConnectionPool {
         }
 
         func prepareForClose() {
+            assert(MultiThreadedEventLoopGroup.currentEventLoop == nil,
+                   "HTTPClient shutdown on EventLoop unsupported") // calls .wait() so it would crash later anyway
             let (waitersFutures, closeFutures) = self.stateLock.withLock { () -> ([EventLoopFuture<Connection>], [EventLoopFuture<Void>]) in
                 assert(self.state.activity == .opened, "Invalid activity: \(self.state.activity)")
                 self.state.activity = .closing
@@ -390,6 +410,8 @@ final class ConnectionPool {
         }
 
         func syncClose() {
+            assert(MultiThreadedEventLoopGroup.currentEventLoop == nil,
+                   "HTTPClient shutdown on EventLoop unsupported") // calls .wait() so it would crash later anyway
             self.stateLock.withLock {
                 assert(self.state.activity == .closing)
                 self.state.activity = .closed
@@ -540,6 +562,7 @@ final class ConnectionPool {
             }
 
             fileprivate mutating func removeFromPool() {
+                assert(self.parentPool.connectionProviders[self.key] != nil)
                 self.parentPool.connectionProviders[self.key] = nil
                 // FIXME: This is redundant
                 self.activity = .closed
