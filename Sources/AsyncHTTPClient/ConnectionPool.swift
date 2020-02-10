@@ -466,7 +466,7 @@ final class ConnectionPool {
             }
 
             fileprivate mutating func releaseAction(for connection: Connection) -> ConnectionReleaseAction {
-                if let firstWaiter = waiters.popFirst() {
+                if let firstWaiter = self.waiters.popFirst() {
                     let (channelEL, requiresSpecifiedEL) = self.resolvePreference(firstWaiter.preference)
 
                     guard connection.isActiveEstimation, !connection.isClosing else {
