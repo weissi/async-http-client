@@ -22,6 +22,11 @@ import NIOTLS
 #if canImport(Network)
     import NIOTransportServices
 #endif
+import NIOExtras
+
+let fileSink = try? NIOWritePCAPHandler.SynchronizedFileSink.fileSinkWritingToFile(path: "/tmp/ahc-\(getpid()).pcap") { error in
+    print("AHC ERROR: something went wrong creating the file sink: \(error)")
+}
 
 extension HTTPConnectionPool {
     enum NegotiatedProtocol {
@@ -296,6 +301,15 @@ extension HTTPConnectionPool.ConnectionFactory {
         preconditionFailure("No matching bootstrap found")
     }
 
+    func addWritePCAP(channel: Channel) -> EventLoopFuture<Void> {
+        if let fileSink = fileSink {
+            return channel.pipeline.addHandler(NIOWritePCAPHandler(mode: .client, fileSink: fileSink.write(buffer:)),
+                                        position: .last)
+        } else {
+            return channel.eventLoop.makeSucceededFuture(())
+        }
+    }
+
     private func makeTLSChannel(deadline: NIODeadline, eventLoop: EventLoop, logger: Logger) -> EventLoopFuture<(Channel, String?)> {
         let bootstrapFuture = self.makeTLSBootstrap(
             deadline: deadline,
@@ -312,6 +326,8 @@ extension HTTPConnectionPool.ConnectionFactory {
             case .http, .http_unix, .unix:
                 preconditionFailure("Unexpected scheme")
             }
+        }.flatMap { channel -> EventLoopFuture<Channel> in
+            self.addWritePCAP(channel: channel).map { channel }
         }.flatMap { channel -> EventLoopFuture<(Channel, String?)> in
             // It is save to use `try!` here, since we are sure, that a `TLSEventsHandler` exists
             // within the pipeline. It is added in `makeTLSBootstrap`.

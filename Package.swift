@@ -33,6 +33,7 @@ let package = Package(
             name: "AsyncHTTPClient",
             dependencies: [
                 .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOExtras", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
