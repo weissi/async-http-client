@@ -17,6 +17,7 @@ import PackageDescription
 
 let package = Package(
     name: "async-http-client",
+    platforms: [.macOS(.v13)],
     products: [
         .library(name: "AsyncHTTPClient", targets: ["AsyncHTTPClient"]),
     ],
@@ -32,6 +33,10 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-algorithms", from: "1.0.0"),
     ],
     targets: [
+        .executableTarget(
+            name: "AsyncHTTPClientPerfTester",
+            dependencies: ["AsyncHTTPClient"]
+        ),
         .target(
             name: "CAsyncHTTPClient",
             cSettings: [
